@@ -11,6 +11,7 @@
                #:gzip-stream
                #:babel
                #:alexandria
+               #:drakma
                #:test-grid-utils
                #:log4cl)
   :components
@@ -22,4 +23,5 @@
      (:file "amazon-simple-db")
      (:file "obfuscate-base64")
      (:file "aws-transaction-log")
+     (:file "http-transaction-log")
      (:file "replica")))))

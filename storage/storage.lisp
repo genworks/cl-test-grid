@@ -28,22 +28,14 @@
 
 (defclass replica (sptm:replica) ())
 
-;; Amazon Web Service credentials for cl-test-grid-user account
-;; in the form (<Access Key Id>  <Secret Access Key>).
-;; This user is not the owner of our S3 bucket and SimpleDB domain,
-;; but has access to them (wich can be quickly revoked in case
-;; of any hooliganism)
-(defparameter *cl-test-grid-user-credentials*
-  (sptm:decredfuscate
-   '("do mdadaea gnisada dahhbsnkbzbvn"
-     "nraicgaqbp anasbdhagbok ah bnay kza zb ieama d bybq lbec d takbznan p a iatcgbkdai")))
-
+;; The storages live on the test grid server (server/server.lisp).
+;; Until 2022 they were Amazon S3 + SimpleDB transaction logs
+;; (sptm:aws-transaction-log); that bucket and domain are gone.
 (defun make-transaction-log (name)
-  (make-instance 'sptm:aws-transaction-log
+  (make-instance 'sptm:http-transaction-log
                  :name name
-                 :simpledb-domain "cltestgrid"
-                 :s3-bucket "cl-test-grid"
-                 :credentials *cl-test-grid-user-credentials*))
+                 :base-url tg-utils:*store-url*
+                 :token tg-utils:*store-token*))
 
 (defun transaction-allowed-p (func-symbol)
   (member func-symbol '(test-grid-data:add-test-run

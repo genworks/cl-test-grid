@@ -37,4 +37,7 @@
    #:save-snapshot
    #:delete-records
    #:credfuscate
-   #:decredfuscate))
+   #:decredfuscate
+
+   ;; transaction log kept by the test grid server over HTTP
+   #:http-transaction-log))

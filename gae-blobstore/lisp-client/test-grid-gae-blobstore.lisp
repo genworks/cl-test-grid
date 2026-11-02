@@ -49,11 +49,21 @@ are specified by BLOB-KEYS - a list of strings."))
   ((base-url :reader base-url
              :type string
              :initarg :base-url
-             :initform (error "The :base-url parameter is required."))))
+             :initform (error "The :base-url parameter is required."))
+   ;; Sent in the X-Test-Grid-Token header; the test grid
+   ;; server (server/server.lisp) requires it for uploads.
+   (token :reader token
+          :type (or null string)
+          :initarg :token
+          :initform nil)))
 
-(defun make-blob-store (&rest params &key base-url)
-  (declare (ignore base-url))
+(defun make-blob-store (&rest params &key base-url token)
+  (declare (ignore base-url token))
   (apply #'make-instance 'blobstore params))
+
+(defun token-headers (blobstore)
+  (when (token blobstore)
+    (list (cons "X-Test-Grid-Token" (token blobstore)))))
 
 (defconstant +max-file-length+ 100000)
 
@@ -120,7 +130,7 @@ the beginning of the file, a warning message, followed by the end of the file."
 ;;                        :element-type '(unsigned-byte 8))
 ;;     (send-shortened-file file out file-len 500)))
 
-(defun submit-files-impl (upload-url-fn id-pathname-alist file-sender-factory &key (batch-size 100))
+(defun submit-files-impl (upload-url-fn id-pathname-alist file-sender-factory &key (batch-size 100) additional-headers)
   "FILE-SENDER-FACTORY is a unary function, accepts pathname, returns
 a file sender as drakma uses - another unary function accepting a byte output stream,
 and writting the file to that stream."
@@ -160,6 +170,7 @@ and writting the file to that stream."
                                                      :method :post
                                                      :content-length t
                                                      :parameters post-params
+                                                     :additional-headers additional-headers
                                                      :want-stream t
                                                      ;; As of the current usocket,
                                                      ;; CCL sockets input-timeout are
@@ -224,7 +235,8 @@ of the pathnames passed in ID-PATHNAME-ALIST."
                                          keep-names-p))
                      id-pathname-alist
                      (alexandria:compose #'wrap-with-gzip #'make-file-sender)
-                     :batch-size batch-size))
+                     :batch-size batch-size
+                     :additional-headers (token-headers blobstore)))
 
 ;;; tests:
 #|

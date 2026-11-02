@@ -6,12 +6,25 @@
   (:nicknames #:tg-utils)
   (:use :cl)
   (:export #:set=
-           #:*utf-8-external-format*))
+           #:*utf-8-external-format*
+           #:*store-url*
+           #:*store-token*))
 
 (in-package #:test-grid-utils)
 
 (defparameter *utf-8-external-format* asdf:*utf-8-external-format*
   "See docstring for ASDF:*UTF-8-EXTERNAL-FORMAT*.")
+
+(defparameter *store-url*
+  (or (uiop:getenv "CL_TEST_GRID_STORE_URL")
+      "https://cl-test-grid.common-lisp.dev")
+  "Base URL of the test grid server (server/server.lisp), which keeps
+the test logs and the result storages.")
+
+(defparameter *store-token*
+  (uiop:getenv "CL_TEST_GRID_TOKEN")
+  "The agent's token for writing to the test grid server, or NIL.
+Reading needs no token.")
 
 (defparameter *utf-8-compatible-character-type*
   #+lispworks 'lw:simple-char

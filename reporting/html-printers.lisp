@@ -47,7 +47,7 @@
                  blob-key)
     (error "BLOB-KEY must only consist of digits or letters to prevent URI injection (as we haven't implemented URL-encoding): ~A" blob-key))
   (format nil "~A/blob?key=~A"
-          "http://cl-test-grid.appspot.com" blob-key))
+          (string-right-trim "/" tg-utils:*store-url*) blob-key))
 
 (defparameter *local-test-runs-dir* #P"/Users/anton/projects/cl-test-grid2-work-dir2/agent/test-runs/")
 

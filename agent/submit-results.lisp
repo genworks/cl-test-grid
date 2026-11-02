@@ -71,10 +71,10 @@ result has blobstore key for log."
            (getf test-run :results))))
 
 (defun make-gae-blobstore ()
-  (test-grid-gae-blobstore:make-blob-store :base-url
-                                           ;; during development of GAE blob storage
-                                           ;; :base-url may be "http://localhost:8080"
-                                           "http://cl-test-grid.appspot.com"))
+  ;; The test grid server (server/server.lisp) speaks the
+  ;; protocol of the old GAE blobstore at cl-test-grid.appspot.com.
+  (test-grid-gae-blobstore:make-blob-store :base-url tg-utils:*store-url*
+                                           :token tg-utils:*store-token*))
 
 (defun submit-test-run-results (test-run-dir storage-names)
   (log:info "Submitting the test results to the server from the directory ~S ..." (truename test-run-dir))

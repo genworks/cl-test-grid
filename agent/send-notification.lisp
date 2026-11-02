@@ -4,13 +4,14 @@
 
 ;;;; Utility to send notifications to the cl-test-grid-notifications google group:
 ;;;; https://groups.google.com/forum/?fromgroups=#!forum/cl-test-grid-notifications.
-;;;; The messages are send via our Heroku server. That way agent remains
+;;;; The messages are send via the test grid server (server/server.lisp;
+;;;; until 2022 a Heroku server). That way agent remains
 ;;;; communicating only via HTTP, and is also restricted to send emails
 ;;;; only to that particular email adress.
 
 (in-package #:test-grid-agent)
 
-(defun send-notification (subject body &key (server-url "http://cl-test-grid.herokuapp.com/"))
+(defun send-notification (subject body &key (server-url tg-utils:*store-url*))
   (handler-case
       (multiple-value-bind (body status)
           (drakma:http-request (concatenate 'string
@@ -18,9 +19,12 @@
                                             (unless (eql #\/ (char server-url (1- (length server-url))))
                                               "/")
                                             "send-notification")
-                               :method :get
+                               :method :post
                                :parameters (list (cons "subject" subject)
-                                                 (cons "body" body)))
+                                                 (cons "body" body))
+                               :additional-headers (when tg-utils:*store-token*
+                                                     (list (cons "X-Test-Grid-Token"
+                                                                 tg-utils:*store-token*))))
         (declare (ignore body))
         (when (/= 200 status)
           (error "Notificateion server returned error HTTP status ~A" status)))
