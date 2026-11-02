@@ -61,6 +61,39 @@ Example crontab record to run agent at 10 o'clock every day:
   0 10 * * * cd /home/testgrid/cl-test-grid/ && ./run-agent.sh
 ```
 
+Where the results go
+--------------------
+
+The agent uploads logs and test results to the test grid server
+(_server/server.lisp_). Two environment variables configure it:
+
+- `CL_TEST_GRID_STORE_URL` - the server's base URL; the default
+  is in `tg-utils:*store-url*`.
+- `CL_TEST_GRID_TOKEN` - your agent's upload token. Reading is
+  public, writing needs a token; ask on the mailing list for one.
+
+Lisps in Docker containers
+--------------------------
+
+A lisp implementation can be run from a Docker image, a fresh
+container for every child process, for example the images at
+https://hub.docker.com/u/clfoundation:
+
+``` common-lisp
+(make-instance 'lisp-exe:docker
+               :image "clfoundation/sbcl:2.6.10"
+               :docker-lisp (make-instance 'lisp-exe:sbcl :exe-path "sbcl")
+               :volumes (list #p"/home/testgrid/cl-test-grid/"))
+```
+
+`:docker-lisp` is the lisp-exe of the implementation inside the image.
+`:volumes` must list the cl-test-grid source directory and the agent's
+work directory (if it is not under the source directory): they are
+mounted into the container at the same paths. If the agent itself runs
+in a container, talking to the Docker daemon through its socket, those
+directories must have the same paths on the Docker host too. On a timeout
+the agent stops the container with `docker kill`.
+
 Details of what agent actually does
 -----------------------------------
 

@@ -34,6 +34,14 @@
            #:lispworks
            #:clasp
 
+           ;; a lisp-exe run in a Docker container
+           #:docker
+           #:image          ; docker slot accessors
+           #:docker-lisp
+           #:volumes
+           #:docker-exe-path
+           #:docker-run-args
+
            ;; the main function of interest for test-grid agent
            #:run-with-timeout
            #:lisp-process-timeout ; timeout condition
@@ -139,6 +147,41 @@ Otherwise he may just ignore the condition."))
 (defclass lispworks (single-exe-lisp-exe) ())
 
 (defclass clasp (single-exe-lisp-exe) ())
+
+;; A lisp run in a Docker container, a fresh container for every child
+;; process; for example the images of https://hub.docker.com/u/clfoundation,
+;; one implementation each.  DOCKER-LISP is a lisp-exe for the
+;; implementation inside the image, its exe-path as seen in the
+;; container: (make-instance 'sbcl :exe-path "sbcl").
+;;
+;; The child process loads the agent's source files and writes its
+;; results into the agent's work directory by absolute paths, so every
+;; directory in VOLUMES is mounted into the container at the same path
+;; it has here.  When the agent itself runs in a container and reaches
+;; the Docker daemon through its socket, those directories must have
+;; the same paths on the Docker host as well.
+(defclass docker (lisp-exe)
+  ((image :type string
+          :accessor image
+          :initarg :image
+          :initform (error "image must be specified"))
+   (docker-lisp :type lisp-exe
+                :accessor docker-lisp
+                :initarg :docker-lisp
+                :initform (error "docker-lisp must be specified"))
+   (volumes :type list
+            :accessor volumes
+            :initarg :volumes
+            :initform '())
+   (docker-exe-path :type string
+                    :accessor docker-exe-path
+                    :initarg :docker-exe-path
+                    :initform "docker")
+   ;; more arguments to "docker run", for example ("--memory" "4g")
+   (docker-run-args :type list
+                    :accessor docker-run-args
+                    :initarg :docker-run-args
+                    :initform '())))
 ;;;
 ;;; Implementation
 ;;;
@@ -151,7 +194,12 @@ Otherwise he may just ignore the condition."))
                    :initform (error ":native-process is required"))
    (script :reader script
            :initarg :script
-           :initform nil)))
+           :initform nil)
+   ;; For a lisp run in a Docker container: the command that stops
+   ;; the container.  Killing the docker client leaves it running.
+   (container-kill-command :reader container-kill-command
+                           :initarg :container-kill-command
+                           :initform nil)))
 
 (defun process-id (process)
   ;; on CCL external-program:process-id returns process handle
@@ -220,6 +268,27 @@ command, the rest strings are the command arguments."))
     (make-instance 'process
                    :native-process (start (first command-line)
                                           (rest command-line)))))
+
+(defmethod start-lisp-process ((lisp-exe docker) &rest forms)
+  (let* ((container-name (format nil "test-grid-~D-~36R"
+                                 (get-universal-time)
+                                 (random #.(expt 36 6))))
+         (volume-args (mapcan (lambda (dir)
+                                (let ((path (string-right-trim "/" (namestring (truename dir)))))
+                                  (list "--volume" (format nil "~A:~A" path path))))
+                              (volumes lisp-exe)))
+         (inner-command-line (make-command-line (docker-lisp lisp-exe)
+                                                (mapcar #'code-str forms))))
+    (make-instance 'process
+                   :native-process (start (docker-exe-path lisp-exe)
+                                          (append (list "run" "--rm" "--interactive"
+                                                        "--name" container-name)
+                                                  volume-args
+                                                  (docker-run-args lisp-exe)
+                                                  (list (image lisp-exe))
+                                                  inner-command-line))
+                   :container-kill-command (list (docker-exe-path lisp-exe)
+                                                 "kill" container-name))))
 
 (defun prepend-each (prepend-what list)
   (mapcan (lambda (elem) (list prepend-what elem))
@@ -387,6 +456,10 @@ external-program:process-status, otherwize returns NIL."
 
 (defun try-to-kill-process-tree (process)
   (log:info "Trying to kill the process tree of ~A" process)
+  (let ((command-line (container-kill-command process)))
+    (when command-line
+      (log:info "Stopping the container of ~A first" process)
+      (exec (car command-line) (cdr command-line))))
   (let ((command-line (if (member :windows *features*)
                           (windows-proc-tree-kill-command process)
                           ;; does non-windows always mean unix-like? :)
