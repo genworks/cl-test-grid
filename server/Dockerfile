@@ -4,21 +4,29 @@
 #   docker run -d -p 127.0.0.1:8080:8080 -v /srv/cl-test-grid:/data cl-test-grid-server
 #
 # /data holds everything the server keeps; put the write tokens in
-# /data/tokens.lisp as ((<token> <who>) ...).  See server/run-server.lisp
-# for the other settings.
+# /data/tokens.lisp as ((<token> <who>) ...).  The docstring of
+# TG-SERVER:MAIN lists the other settings.
 
-FROM clfoundation/sbcl:2.6.10
+FROM clfoundation/sbcl:2.6.10 AS build
 
-ENV QUICKLISP_ADD_TO_INIT_FILE=true
 RUN install-quicklisp
 
 COPY . /cl-test-grid
+# TLS is the front web server's job; without it the executable
+# needs no libssl.
 RUN sbcl --non-interactive \
+         --load /root/quicklisp/setup.lisp \
+         --eval '(push :hunchentoot-no-ssl *features*)' \
          --eval '(push #p"/cl-test-grid/" asdf:*central-registry*)' \
-         --eval '(ql:quickload :test-grid-server)'
+         --eval '(ql:quickload :test-grid-server)' \
+         --eval '(sb-ext:save-lisp-and-die "/tg-server" :executable t :toplevel (function tg-server:main))'
+
+FROM debian:trixie-slim
+
+COPY --from=build /tg-server /usr/local/bin/tg-server
 
 ENV TEST_GRID_SERVER_DATA_DIR=/data
 VOLUME /data
 EXPOSE 8080
 
-CMD ["sbcl", "--non-interactive", "--load", "/cl-test-grid/server/run-server.lisp"]
+CMD ["tg-server"]
