@@ -6,7 +6,11 @@
   :version "1.0.1"
   :serial t
   :depends-on (#:hunchentoot
-               #:cl-smtp)
+               #:cl-smtp
+               #:bordeaux-threads
+               #:flexi-streams
+               #:gzip-stream
+               #:uiop)
   :components 
     ((:module "server"
       :serial t
