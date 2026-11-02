@@ -33,6 +33,9 @@
            #:compiler ; ecl slot accessor
            #:lispworks
            #:clasp
+           #:abcl-launcher
+           #:dotcl
+           #:egcl
 
            ;; a lisp-exe run in a Docker container
            #:docker
@@ -147,6 +150,14 @@ Otherwise he may just ignore the condition."))
 (defclass lispworks (single-exe-lisp-exe) ())
 
 (defclass clasp (single-exe-lisp-exe) ())
+
+;; ABCL started through a launcher script that knows the JVM
+;; options, such as the abcl script of the clfoundation/abcl images;
+;; use the ABCL class above to start java yourself.
+(defclass abcl-launcher (single-exe-lisp-exe) ())
+
+(defclass dotcl (single-exe-lisp-exe) ())
+(defclass egcl (single-exe-lisp-exe) ())
 
 ;; A lisp run in a Docker container, a fresh container for every child
 ;; process; for example the images of https://hub.docker.com/u/clfoundation,
@@ -401,6 +412,27 @@ command, the rest strings are the command arguments."))
           #+(or) "--eval (setq clasp-cleavir::*use-ast-interpreter* nil)"
           ,@(prepend-each "--eval" form-strings)
           "--eval" "(core:quit)")))
+
+(defmethod make-command-line ((lisp-exe abcl-launcher) form-strings)
+  (cons (exe-path lisp-exe)
+        `("--noinit"
+          "--nosystem"
+          "--batch"
+          "--eval" "(require :abcl-contrib)"
+          ,@(prepend-each "--eval" form-strings))))
+
+;; dotcl exits after the last --eval.
+(defmethod make-command-line ((lisp-exe dotcl) form-strings)
+  (cons (exe-path lisp-exe)
+        `("--no-init"
+          ,@(prepend-each "--eval" form-strings))))
+
+;; EGCL 0.0.11 takes one --eval (given several, it evaluates the last
+;; one that many times), so the forms go in one PROGN; it exits after it.
+(defmethod make-command-line ((lisp-exe egcl) form-strings)
+  (cons (exe-path lisp-exe)
+        `("--no-init"
+          "--eval" ,(format nil "(progn ~{~A~^ ~})" form-strings))))
 
 ;;; Timeouts: waiting for the process and killing the process tree on timeout;
 ;;; also detecting the machine hibernation while the process is running.

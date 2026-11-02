@@ -86,6 +86,13 @@ https://hub.docker.com/u/clfoundation:
                :volumes (list #p"/home/testgrid/cl-test-grid/"))
 ```
 
+Ready-made: _run-agent-docker.sh_ at the top of the source tree runs
+the agent in a container with every lisp from the clfoundation images,
+needing only docker on the machine; _run-agent-docker.lisp_ holds the
+catalog of images and reads the settings (your email, your token, which
+lisps, which projects) from the environment or from an _agent.env_ file
+beside it.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are
