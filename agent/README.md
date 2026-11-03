@@ -104,6 +104,19 @@ the package list of Quicklisp's own build host. dotcl and Allegro keep
 their own images. CMUCL is a 32-bit lisp and still cannot load those
 64-bit libraries.
 
+A branch of a project's repository can be tested in place of the
+dist's release of it: set `TEST_GRID_OVERLAYS` to one or more
+`<project>=<git url>#<branch>`, comma-separated, for example
+`gendl=https://gitlab.common-lisp.net/gendl/gendl.git#devo`. After the
+dist's pass, each overlay is tested as a lib-world of its own, named
+like `quicklisp 2026-01-01 + gendl@devo e8f10597`, with the branch
+cloned into the private Quicklisp's `local-projects/` for that pass
+only. The results sit beside the dist's in the storage, so the reports
+compare them (a Quicklisp-diff of the two lib-worlds is the branch
+against the release), and a new commit on the branch is a new
+lib-world, tested afresh. The project's systems are those the dist
+lists for it.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are

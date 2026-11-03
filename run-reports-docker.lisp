@@ -96,10 +96,13 @@
 (defun write-index ()
   (let* ((db (tg-storage:data *replica*))
          (runs (getf db :runs))
-         (lib-worlds (sort (remove-duplicates
-                            (mapcar (lambda (run) (getf (getf run :descr) :lib-world)) runs)
-                            :test #'string=)
+         (all-lib-worlds (remove-duplicates
+                          (mapcar (lambda (run) (getf (getf run :descr) :lib-world)) runs)
+                          :test #'string=))
+         (lib-worlds (sort (remove-if #'test-grid-reporting::overlay-lib-world-p all-lib-worlds)
                            #'string>))
+         (overlays (sort (remove-if-not #'test-grid-reporting::overlay-lib-world-p all-lib-worlds)
+                         #'string<))
          (lisps (sort (remove-duplicates
                        (mapcar (lambda (run) (getf (getf run :descr) :lisp)) runs)
                        :test #'string=)
@@ -129,7 +132,13 @@ The project: <a href=\"https://github.com/cl-test-grid/cl-test-grid\">cl-test-gr
   <li><a href=\"testsuites-pivots.html\">Pivot tables</a> of the test suite results</li>
   <li><a href=\"export.csv\">CSV export</a> of the test suite results</li>
 </ul>
-<h2>In the database</h2>
+~:[~;<h2>Branches under test</h2>
+<p>A branch of a project's repository tested in place of the dist's
+release of it; each page is the diff against the dist.</p>
+<ul>~:*~{
+  <li><a href=\"overlays/~A-diff.html\">~A</a></li>~}
+</ul>
+~]<h2>In the database</h2>
 <p>~A test runs, Quicklisp versions:~{ ~A~^,~}.</p>
 <p>Implementations:</p>
 <ul>~{
@@ -139,6 +148,9 @@ The project: <a href=\"https://github.com/cl-test-grid/cl-test-grid\">cl-test-gr
 </body>
 </html>
 "
+              (loop for overlay in overlays
+                 collect (test-grid-reporting::file-safe-name overlay)
+                 collect overlay)
               (length runs) lib-worlds lisps
               (multiple-value-bind (s m h day month year) (decode-universal-time (get-universal-time) 0)
                 (format nil "~4,'0D-~2,'0D-~2,'0D ~2,'0D:~2,'0D:~2,'0D UTC" year month day h m s))))))

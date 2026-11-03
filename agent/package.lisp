@@ -23,6 +23,9 @@
 
            ;; agent main function
            #:main
+           ;; the same run against another Quicklisp directory, as a
+           ;; lib-world of its own
+           #:test-patched-quicklisp
 
            ;; DEPRECATED
            #:+api-version+

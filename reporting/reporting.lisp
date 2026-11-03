@@ -68,10 +68,34 @@ to the directory the web server publishes).")
                                                                                    (getf run :results))))
                                          (getf db :runs))))
 
+;;; Overlay lib-worlds: an agent testing a branch of a project in
+;;; place of the dist's release names the lib-world
+;;; "<dist> + <project>@<branch> <commit>" (run-agent-docker.lisp,
+;;; TEST_GRID_OVERLAYS).  They are not dists: the dist-level reports
+;;; leave them out, and each gets a diff against its own dist.
+
+(defun overlay-lib-world-p (lib-world)
+  (search " + " lib-world))
+
+(defun overlay-base (lib-world)
+  "The dist an overlay lib-world was tested on."
+  (subseq lib-world 0 (overlay-lib-world-p lib-world)))
+
+(defun dist-results (all-results)
+  (subset all-results (lambda (r) (not (overlay-lib-world-p (lib-world r))))))
+
+(defun overlay-lib-worlds (all-results)
+  (sort (distinct1 (subset all-results (lambda (r) (overlay-lib-world-p (lib-world r))))
+                   #'lib-world)
+        #'string<))
+
+(defun file-safe-name (string)
+  (substitute-if #\- (lambda (c) (not (or (alphanumericp c) (find c "-_.")))) string))
+
 (defun generate-reports (db)
   (let* ((all-results (my-time ("list-results...")
                         (list-results db)))
-         (last-three-quicklisps (largest #'lib-world all-results :count 3))
+         (last-three-quicklisps (largest #'lib-world (dist-results all-results) :count 3))
          (new-quicklisp (first last-three-quicklisps))
          (prev-quicklisp (second last-three-quicklisps))
          ;; Old reports can work only with lib-result objects representing
@@ -113,6 +137,13 @@ to the directory the web server publishes).")
 
     (my-time ("library reports...")
       (print-library-reports all-results))
+
+    (my-time ("overlay diffs...~%")
+      (dolist (overlay (overlay-lib-worlds all-results))
+        (print-quicklisp-diff-report (format nil "overlays/~A-diff.html" (file-safe-name overlay))
+                                     all-results
+                                     (overlay-base overlay)
+                                     overlay)))
 
   ;  (print-compiler-reports all-results new-quicklisp)
     ))

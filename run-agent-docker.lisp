@@ -36,6 +36,15 @@
 ;;;;                            Allegro CL Free Express Edition license
 ;;;;                            (the image prints where it is); without it
 ;;;;                            allegro is left out
+;;;;   TEST_GRID_OVERLAYS       comma-separated <project>=<git url>#<branch>,
+;;;;                            e.g. gendl=https://gitlab.common-lisp.net/gendl/gendl.git#devo
+;;;;                            After the dist, each is tested as a lib-world
+;;;;                            of its own, "<dist> + <project>@<branch> <commit>",
+;;;;                            with that branch in place of the dist's
+;;;;                            release of the project; a new commit on the
+;;;;                            branch is a new lib-world, tested afresh.
+;;;;                            TEST_GRID_LISPS applies; TEST_GRID_PROJECTS
+;;;;                            does not (an overlay tests its project).
 
 (defparameter *this-dir*
   (make-pathname :name nil :type nil :defaults *load-truename*))
@@ -207,4 +216,90 @@
 (unless (env "CL_TEST_GRID_TOKEN")
   (error "CL_TEST_GRID_TOKEN is not set; the results could not be uploaded"))
 
+;;; Overlays: a branch of a project's repository in place of the
+;;; dist's release of it, tested as a lib-world of its own.  The
+;;; clone is kept under the private Quicklisp, so the children's fasl
+;;; translation covers it, and is moved into local-projects/ for its
+;;; pass only: Quicklisp prefers local-projects over the dist, and
+;;; nothing else ever puts anything there.
+
+(defparameter *quicklisp-dir* (merge-pathnames "quicklisp/" *work-dir*))
+(defparameter *overlays-dir* (merge-pathnames "overlays/" *quicklisp-dir*))
+(defparameter *local-projects-dir* (merge-pathnames "local-projects/" *quicklisp-dir*))
+
+(defun parse-overlay (spec)
+  (let ((eq (position #\= spec))
+        (hash (position #\# spec :from-end t)))
+    (unless (and eq hash (< eq hash))
+      (error "TEST_GRID_OVERLAYS entry ~S: expected <project>=<git url>#<branch>" spec))
+    (list :project (string-downcase (subseq spec 0 eq))
+          :url (subseq spec (1+ eq) hash)
+          :branch (subseq spec (1+ hash)))))
+
+(defparameter *overlays* (mapcar #'parse-overlay (env-list "TEST_GRID_OVERLAYS")))
+
+(defun run (&rest command)
+  (string-trim '(#\Newline #\Return #\Space)
+               (uiop:run-program command :output :string :error-output t)))
+
+(defun overlay-clone-dir (overlay)
+  (merge-pathnames (format nil "~A@~A/" (getf overlay :project) (getf overlay :branch))
+                   *overlays-dir*))
+
+(defun fetch-overlay (overlay)
+  "Clones the branch, or brings the clone up to date; returns the commit."
+  (let ((dir (overlay-clone-dir overlay))
+        (branch (getf overlay :branch)))
+    (ensure-directories-exist *overlays-dir*)
+    (if (probe-file (merge-pathnames ".git/" dir))
+        (progn
+          (run "git" "-C" (namestring dir) "fetch" "--depth" "1" "origin" branch)
+          (run "git" "-C" (namestring dir) "reset" "--hard" "--quiet" "FETCH_HEAD"))
+        (uiop:run-program (list "git" "clone" "--depth" "1" "--branch" branch
+                                (getf overlay :url) (namestring dir))
+                          :output t :error-output t))
+    (run "git" "-C" (namestring dir) "rev-parse" "--short=8" "HEAD")))
+
+(defun dist-lib-world ()
+  "The lib-world name of the private Quicklisp's dist, as the agent names it."
+  (let (name version)
+    (with-open-file (in (merge-pathnames "dists/quicklisp/distinfo.txt" *quicklisp-dir*))
+      (loop for line = (read-line in nil)
+         while line
+         do (cond ((uiop:string-prefix-p "name: " line) (setf name (subseq line 6)))
+                  ((uiop:string-prefix-p "version: " line) (setf version (subseq line 9))))))
+    (format nil "~A ~A" name version)))
+
+(defun clear-local-projects ()
+  "Nothing of ours stays in local-projects/ between passes; a pass that
+died mid-way may have left its clone there, and it must not be taken
+for the dist."
+  (when (probe-file *local-projects-dir*)
+    (dolist (dir (uiop:subdirectories *local-projects-dir*))
+      (format t "~&Removing ~A left in local-projects/~%" dir)
+      (uiop:delete-directory-tree dir :validate t))
+    (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" *local-projects-dir*))))
+
+(defun test-overlay (overlay)
+  (let* ((project (getf overlay :project))
+         (commit (fetch-overlay overlay))
+         (lib-world (format nil "~A + ~A@~A ~A" (dist-lib-world) project (getf overlay :branch) commit))
+         (clone (overlay-clone-dir overlay))
+         (in-place (merge-pathnames (format nil "~A/" project) *local-projects-dir*)))
+    (format t "~&Testing ~A from ~A, branch ~A at ~A, as the lib-world ~S~%"
+            project (getf overlay :url) (getf overlay :branch) commit lib-world)
+    (finish-output)
+    (ensure-directories-exist *local-projects-dir*)
+    (run "mv" (string-right-trim "/" (namestring clone)) (string-right-trim "/" (namestring in-place)))
+    (unwind-protect
+         (test-grid-agent:test-patched-quicklisp *agent* *quicklisp-dir* lib-world
+                                                 :project-names (list project))
+      (run "mv" (string-right-trim "/" (namestring in-place)) (string-right-trim "/" (namestring clone)))
+      (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" *local-projects-dir*)))))
+
+(clear-local-projects)
+
 (test-grid-agent:main *agent*)
+
+(dolist (overlay *overlays*)
+  (test-overlay overlay))

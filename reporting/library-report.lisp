@@ -86,12 +86,17 @@
                    report))))
 
 (defun print-library-reports (all-results)
-  (let* ((last-quicklisps (sort (largest #'lib-world all-results :count 2)
+  (let* ((last-quicklisps (sort (largest #'lib-world (dist-results all-results) :count 2)
                                 #'string<))
+         ;; the last two dists, and the overlays tested on them
          (recent-results (subset all-results
-                                 (lambda (r) (member (lib-world r)
-                                                     last-quicklisps
-                                                     :test #'string=))))
+                                 (lambda (r)
+                                   (let ((lib-world (lib-world r)))
+                                     (member (if (overlay-lib-world-p lib-world)
+                                                 (overlay-base lib-world)
+                                                 lib-world)
+                                             last-quicklisps
+                                             :test #'string=)))))
          (results-by-libname (group-by recent-results '(libname)))
          (libnames (sort (distinct1 recent-results #'libname) #'string<))
          (lisps (sort (distinct1 recent-results #'lisp) #'string<))

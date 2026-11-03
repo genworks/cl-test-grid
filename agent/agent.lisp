@@ -288,10 +288,13 @@ the PREDICATE."
                                                   lisp
                                                   (projects-to-test agent))))
               (submit-test-run-results results-dir (result-storages-for-lisp agent lisp))
-              ;; A run over a chosen few projects (trying the setup
-              ;; out) is not the lisp tested on this lib-world: the
-              ;; full run must still happen.
-              (unless (custom-project-names agent)
+              ;; A run over a chosen few projects of the dist (trying
+              ;; the setup out) is not the lisp tested on this
+              ;; lib-world: the full run must still happen.  A custom
+              ;; lib-world is complete with its project list, though
+              ;; (an overlay names the projects it replaces).
+              (unless (and (custom-project-names agent)
+                           (not (custom-lib-world agent)))
                 (mark-tested (persistence agent) lib-world (implementation-identifier lisp)))
               (cl-fad:delete-directory-and-files results-dir :if-does-not-exist :ignore)))
           continue)))))
