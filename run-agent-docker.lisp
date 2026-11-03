@@ -129,7 +129,10 @@
   (let ((image (getf (rest entry) :image)))
     (format t "~&Pulling ~A ...~%" image)
     (finish-output)
-    (uiop:run-program (list "docker" "pull" "--quiet" image)
+    ;; not --quiet: a full image is over a gigabyte, and the layer
+    ;; status lines are the only sign of life while it downloads and
+    ;; extracts
+    (uiop:run-program (list "docker" "pull" image)
                       :output t :error-output t)))
 
 (defparameter *lisps* (mapcar #'docker-lisp *entries*))
