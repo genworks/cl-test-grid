@@ -123,6 +123,15 @@
 
 (format t "~&Testing on ~A: ~{~A~^, ~}~%" *arch* (mapcar #'first *entries*))
 
+;; Pull the images first: a pull inside a child's run would count
+;; against that child's timeout (the configuration check gives 60 s).
+(dolist (entry *entries*)
+  (let ((image (getf (rest entry) :image)))
+    (format t "~&Pulling ~A ...~%" image)
+    (finish-output)
+    (uiop:run-program (list "docker" "pull" "--quiet" image)
+                      :output t :error-output t)))
+
 (defparameter *lisps* (mapcar #'docker-lisp *entries*))
 
 ;; SBCL does the auxiliary work (updating Quicklisp, listing its
