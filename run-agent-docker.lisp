@@ -92,7 +92,7 @@
                :lisp ,(make-instance 'lisp-exe:dotcl :exe-path "dotcl"))
     ("cmucl"   :image "cmucl:21f-trixie" :arches ("amd64")
                :lisp ,(make-instance 'lisp-exe:cmucl :exe-path "cmucl"))
-    ("egcl"    :image "egcl:0.0.11-trixie" :arches ("amd64")
+    ("egcl"    :image "egcl:0.0.11-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:egcl :exe-path "egcl"))
     ("allegro" :image "allegro:11.0express-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:acl :exe-path "alisp")
