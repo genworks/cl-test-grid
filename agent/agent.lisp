@@ -288,7 +288,11 @@ the PREDICATE."
                                                   lisp
                                                   (projects-to-test agent))))
               (submit-test-run-results results-dir (result-storages-for-lisp agent lisp))
-              (mark-tested (persistence agent) lib-world (implementation-identifier lisp))
+              ;; A run over a chosen few projects (trying the setup
+              ;; out) is not the lisp tested on this lib-world: the
+              ;; full run must still happen.
+              (unless (custom-project-names agent)
+                (mark-tested (persistence agent) lib-world (implementation-identifier lisp)))
               (cl-fad:delete-directory-and-files results-dir :if-does-not-exist :ignore)))
           continue)))))
 
