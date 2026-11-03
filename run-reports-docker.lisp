@@ -92,6 +92,15 @@
 (setf test-grid-reporting::*reports-dir* *reports-dir*)
 (test-grid-reporting::generate-reports (tg-storage:data *replica*))
 
+(defun polyfill-summaries ()
+  "What generate-reports wrote about the polyfill manifests, for the index."
+  (let ((file (merge-pathnames "polyfills/summary.sexp" *reports-dir*)))
+    (when (probe-file file)
+      (with-open-file (in file)
+        (let ((*read-eval* nil)
+              (*package* (find-package :cl-user)))
+          (read in nil nil))))))
+
 ;;; An index page pointing at them
 (defun write-index ()
   (let* ((db (tg-storage:data *replica*))
@@ -134,9 +143,17 @@ The project: <a href=\"https://github.com/cl-test-grid/cl-test-grid\">cl-test-gr
 </ul>
 ~:[~;<h2>Branches under test</h2>
 <p>A branch of a project's repository tested in place of the dist's
-release of it; each page is the diff against the dist.</p>
+release of it; each page is the diff against the lib-world under it.</p>
 <ul>~:*~{
   <li><a href=\"overlays/~A-diff.html\">~A</a></li>~}
+</ul>
+~]~:[~;<h2>Polyfills</h2>
+<p>The projects an implementation still needs a patched source for: each
+is tested on the stock dist and on the dist with the polyfill installed,
+and an entry is retirable once the stock release passes.  The number to
+watch is the entries still needed.</p>
+<ul>~:*~{
+  <li><a href=\"~A\">~A</a>: ~D entries, ~D still needed, ~D retirable, ~D untested, ~D without a public source</li>~}
 </ul>
 ~]<h2>In the database</h2>
 <p>~A test runs, Quicklisp versions:~{ ~A~^,~}.</p>
@@ -151,6 +168,14 @@ release of it; each page is the diff against the dist.</p>
               (loop for overlay in overlays
                  collect (test-grid-reporting::file-safe-name overlay)
                  collect overlay)
+              (loop for summary in (polyfill-summaries)
+                 collect (getf summary :file)
+                 collect (getf summary :lisp)
+                 collect (getf summary :entries)
+                 collect (getf summary :needed)
+                 collect (getf summary :retirable)
+                 collect (getf summary :untested)
+                 collect (getf summary :candidates))
               (length runs) lib-worlds lisps
               (multiple-value-bind (s m h day month year) (decode-universal-time (get-universal-time) 0)
                 (format nil "~4,'0D-~2,'0D-~2,'0D ~2,'0D:~2,'0D:~2,'0D UTC" year month day h m s))))))

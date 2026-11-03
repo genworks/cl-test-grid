@@ -117,6 +117,26 @@ against the release), and a new commit on the branch is a new
 lib-world, tested afresh. The project's systems are those the dist
 lists for it.
 
+A lisp the stock dist does not serve well yet can carry a polyfill: a
+manifest, `polyfills/<lisp>.sexp`, listing the projects that need a
+patched source on that lisp for now, each as a git URL and a pinned
+commit, with the reason, the upstream status and the condition for
+retiring the entry. The catalog names it (`:polyfill
+"polyfills/egcl.sexp"`). Such a lisp gets an agent and a private
+Quicklisp of its own, and is tested twice: on the stock dist, and on the
+stock dist with the polyfill dist installed over it, as the lib-world
+`quicklisp 2026-01-01 + polyfill-egcl 2026-11-03.8d1d0e` (the manifest's
+version and six hex of its hash). `build-polyfill-dist.lisp` makes that
+dist on the agent host (a real Quicklisp dist: archives, releases.txt,
+systems.txt, distinfo.txt, under `<work dir>/polyfill/<version>/`) and
+`agent/proc-install-dist.lisp` installs it from `file://` URLs, through
+a file scheme added to the Quicklisp client's fetch table, so nothing
+is served. The overlays run on both lib-worlds. The reports put every
+entry's stock and polyfilled results side by side in
+`polyfills/<lisp>.html` and mark an entry retirable once the stock
+release passes: the manifest is meant to shrink to nothing as the
+patches reach upstream.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are

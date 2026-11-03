@@ -78,8 +78,10 @@ to the directory the web server publishes).")
   (search " + " lib-world))
 
 (defun overlay-base (lib-world)
-  "The dist an overlay lib-world was tested on."
-  (subseq lib-world 0 (overlay-lib-world-p lib-world)))
+  "The lib-world an overlay was tested on: everything before its last
+segment, so an overlay on a polyfilled dist diffs against the
+polyfilled dist, and the polyfilled dist against the stock one."
+  (subseq lib-world 0 (search " + " lib-world :from-end t)))
 
 (defun dist-results (all-results)
   (subset all-results (lambda (r) (not (overlay-lib-world-p (lib-world r))))))
@@ -144,6 +146,9 @@ to the directory the web server publishes).")
                                      all-results
                                      (overlay-base overlay)
                                      overlay)))
+
+    (my-time ("polyfill reports...~%")
+      (print-polyfill-reports all-results new-quicklisp))
 
   ;  (print-compiler-reports all-results new-quicklisp)
     ))

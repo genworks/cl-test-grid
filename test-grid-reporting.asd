@@ -30,6 +30,7 @@
      (:file "status-icon-svg")
      (:file "status-icon-png")
      (:file "library-report")
+     (:file "polyfill-report")
      (:file "regressions")
      (:file "meta-info-from-quicklisp")
      (:file "dependencies-and-blockers")

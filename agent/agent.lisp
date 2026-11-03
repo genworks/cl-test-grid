@@ -245,6 +245,11 @@ the PREDICATE."
 
 ;;; Main program
 
+(defvar *mark-tested* t
+  "When NIL, a run does not record its lisps as tested on the lib-world:
+for a pass over a chosen few projects of a custom lib-world whose full
+pass must still happen (a polyfilled dist tried out).")
+
 (defun run-tests (agent lib-world)
   (divide-into (lisp-exes agent) (lambda (lisp)
                                    (tested-p (persistence agent)
@@ -293,8 +298,9 @@ the PREDICATE."
               ;; lib-world: the full run must still happen.  A custom
               ;; lib-world is complete with its project list, though
               ;; (an overlay names the projects it replaces).
-              (unless (and (custom-project-names agent)
-                           (not (custom-lib-world agent)))
+              (unless (or (not *mark-tested*)
+                          (and (custom-project-names agent)
+                               (not (custom-lib-world agent))))
                 (mark-tested (persistence agent) lib-world (implementation-identifier lisp)))
               (cl-fad:delete-directory-and-files results-dir :if-does-not-exist :ignore)))
           continue)))))
@@ -368,8 +374,9 @@ the PREDICATE."
               ,@body)
          (setf ,place ,old)))))
 
-(defun test-patched-quicklisp (agent quicklisp-dir lib-world-id &key project-names)
-  (with-value ((custom-lib-world agent)
-               (list :directory quicklisp-dir :id lib-world-id))
-    (with-value ((custom-project-names agent) project-names)
-      (main agent))))
+(defun test-patched-quicklisp (agent quicklisp-dir lib-world-id &key project-names (mark-tested t))
+  (let ((*mark-tested* mark-tested))
+    (with-value ((custom-lib-world agent)
+                 (list :directory quicklisp-dir :id lib-world-id))
+      (with-value ((custom-project-names agent) project-names)
+        (main agent)))))

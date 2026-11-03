@@ -48,6 +48,20 @@
 ;;;;                            branch is a new lib-world, tested afresh.
 ;;;;                            TEST_GRID_LISPS applies; TEST_GRID_PROJECTS
 ;;;;                            does not (an overlay tests its project).
+;;;;
+;;;; Polyfills (no setting; the catalog).  A lisp whose entry names a
+;;;; manifest (:polyfill "polyfills/<lisp>.sexp") is tested twice: on
+;;;; the stock dist, and on the stock dist with the polyfill dist built
+;;;; from the manifest installed over it, as the lib-world
+;;;; "<dist> + polyfill-<lisp> <version>"; the overlays run on both.
+;;;; The manifest lists the projects that need a patched source on that
+;;;; lisp for now, one pinned commit each; build-polyfill-dist.lisp
+;;;; makes the dist on this host and agent/proc-install-dist.lisp
+;;;; installs it from file:// URLs.  Such a lisp gets an agent of its
+;;;; own (as :own-quicklisp does), so the polyfill never reaches the
+;;;; other lisps' Quicklisp.  With TEST_GRID_PROJECTS set, the
+;;;; polyfilled pass covers those projects without marking the lisp
+;;;; tested on that lib-world, so the full pass still happens.
 
 (defparameter *this-dir*
   (make-pathname :name nil :type nil :defaults *load-truename*))
@@ -72,6 +86,8 @@
 
 (let ((asdf:*central-registry* (cons *this-dir* asdf:*central-registry*)))
   (ql:quickload :test-grid-agent))
+
+(load (merge-pathnames "build-polyfill-dist.lisp" *this-dir*))
 
 (defun env-list (name)
   (let ((value (env name)))
@@ -121,7 +137,16 @@
                :lisp ,(make-instance 'lisp-exe:dotcl :exe-path "dotcl"))
     ("cmucl"   :image "cmucl:21f-trixie" :arches ("amd64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:cmucl :exe-path "cmucl"))
-    ("egcl"    :image "egcl:0.0.11-trixie" :arches ("amd64" "arm64") :in-devel t
+    ;; The glibc build of EGCL: the musl one is static and cannot
+    ;; dlopen, so nothing over CFFI loads there.  Both report the same
+    ;; implementation identifier.  Its polyfill manifest carries Green's
+    ;; EGCL forks of the libraries the stock dist refuses it.  (A
+    ;; "no primary method found" from every quickload on 2026-11-03 was
+    ;; not this image but Quicklisp's client rebuilding the
+    ;; local-projects index on a lisp it has no DIRECTORY-ENTRIES for;
+    ;; the preferred lisp rebuilds it now, see TEST-OVERLAY.)
+    ("egcl"    :image "egcl:0.0.11-trixie-gnu" :arches ("amd64" "arm64") :in-devel t
+               :polyfill "polyfills/egcl.sexp"
                :lisp ,(make-instance 'lisp-exe:egcl :exe-path "egcl"))
     ("allegro" :image "allegro:11.0express-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:acl :exe-path "alisp")
@@ -234,11 +259,19 @@
                  :singleton-lock-port lock-port)))
     (when *projects*
       (setf (test-grid-agent::custom-project-names agent) *projects*))
-    (list :names (mapcar #'first entries) :agent agent)))
+    (list :names (mapcar #'first entries) :agent agent
+          ;; the manifest of a lisp alone in its agent, if it has one
+          :polyfill (let ((manifest (and (null (rest entries)) (getf (rest (first entries)) :polyfill))))
+                      (and manifest (merge-pathnames manifest *this-dir*))))))
+
+(defun own-agent-p (entry)
+  "An entry whose lisp runs from an agent and a Quicklisp of its own."
+  (or (getf (rest entry) :own-quicklisp)
+      (getf (rest entry) :polyfill)))
 
 (defparameter *agents*
-  (let ((shared (remove-if (lambda (entry) (getf (rest entry) :own-quicklisp)) *entries*))
-        (own (remove-if-not (lambda (entry) (getf (rest entry) :own-quicklisp)) *entries*))
+  (let ((shared (remove-if #'own-agent-p *entries*))
+        (own (remove-if-not #'own-agent-p *entries*))
         (port 7685))
     (append (when shared
               (list (make-agent shared *work-dir* port)))
@@ -318,10 +351,12 @@ for the dist."
         (uiop:delete-directory-tree dir :validate t))
       (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
 
-(defun test-overlay (agent overlay)
+(defun test-overlay (agent overlay &key (base (dist-lib-world agent)))
+  "Tests OVERLAY's project from its branch as a lib-world over BASE, the
+dist's lib-world or a polyfilled one."
   (let* ((project (getf overlay :project))
          (commit (fetch-overlay agent overlay))
-         (lib-world (format nil "~A + ~A@~A ~A" (dist-lib-world agent) project (getf overlay :branch) commit))
+         (lib-world (format nil "~A + ~A@~A ~A" base project (getf overlay :branch) commit))
          (clone (overlay-clone-dir agent overlay))
          (local-projects (local-projects-dir agent))
          (in-place (merge-pathnames (format nil "~A/" project) local-projects)))
@@ -330,20 +365,131 @@ for the dist."
     (finish-output)
     (ensure-directories-exist local-projects)
     (run "mv" (string-right-trim "/" (namestring clone)) (string-right-trim "/" (namestring in-place)))
+    ;; Quicklisp rebuilds local-projects/system-index.txt in whichever
+    ;; lisp next looks, through DIRECTORY-ENTRIES, which its client
+    ;; implements for a fixed list of lisps (not EGCL): so the preferred
+    ;; lisp rebuilds it now, while the directory is newer than the index.
+    (refresh-local-projects agent)
     (unwind-protect
          (test-grid-agent:test-patched-quicklisp agent (quicklisp-dir agent) lib-world
                                                  :project-names (list project))
       (run "mv" (string-right-trim "/" (namestring in-place)) (string-right-trim "/" (namestring clone)))
       (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
 
-;;; The runs: for each agent, the dist, then the overlays.
+;;; Polyfills: the dist built from the lisp's manifest, installed over
+;;; the stock one in the agent's private Quicklisp by a child of the
+;;; preferred lisp (the Quicklisp client's work; see
+;;; agent/proc-install-dist.lisp), removed again before the next stock
+;;; pass.
+
+(defun run-in-preferred-lisp (agent timeout &rest forms)
+  "Runs FORMS in a child of the agent's preferred lisp with the private
+Quicklisp and agent/proc-install-dist.lisp loaded; the last form's
+value is returned (through a response file, as the agent does it)."
+  ;; the response file must be where the child can write it: under
+  ;; the work directory, mounted into the child's container (the agent
+  ;; binds this the same way around its own children)
+  (let ((lisp-exe:*temp-dir* (test-grid-agent:work-dir agent)))
+    (test-grid-agent::with-response-file (response-file)
+      (apply #'lisp-exe:run-with-timeout timeout
+             (test-grid-agent::preferred-lisp agent)
+             `(load ,(merge-pathnames "setup.lisp" (quicklisp-dir agent)))
+             `(load ,(truename (test-grid-agent::src-file "proc-common.lisp")))
+             `(load ,(truename (test-grid-agent::src-file "proc-install-dist.lisp")))
+             (append (butlast forms)
+                     (list `(cl-user::set-response ,response-file ,(car (last forms)))))))))
+
+(defun refresh-local-projects (agent)
+  "Rebuilds the private Quicklisp's local-projects index in the preferred lisp."
+  (when (probe-file (merge-pathnames "setup.lisp" (quicklisp-dir agent)))
+    (run-in-preferred-lisp agent 600 '(progn (ql:register-local-projects) t))))
+
+(defun remove-polyfill (agent manifest-file)
+  "Takes the polyfill dist out of the agent's Quicklisp, if it is there."
+  (when (probe-file (merge-pathnames "setup.lisp" (quicklisp-dir agent)))
+    (let ((name (tg-polyfill:dist-name (tg-polyfill:read-manifest manifest-file))))
+      (when (run-in-preferred-lisp agent 600 `(cl-user::remove-polyfill-dist ,name))
+        (format t "~&Removed the ~A dist before the stock pass.~%" name)))))
+
+(defun install-polyfill (agent manifest-file)
+  "Builds the manifest's dist and installs it over the stock one;
+returns the lib-world name of the polyfilled Quicklisp."
+  (multiple-value-bind (distinfo-url version name)
+      (tg-polyfill:build-dist manifest-file (merge-pathnames "polyfill/" (test-grid-agent:work-dir agent))
+                              :stock-systems-file (merge-pathnames "dists/quicklisp/systems.txt" (quicklisp-dir agent)))
+    (format t "~&Installing ~A ~A into ~A~%" name version (quicklisp-dir agent))
+    (finish-output)
+    (let ((installed (run-in-preferred-lisp agent 1800 `(cl-user::install-polyfill-dist ,name ,distinfo-url))))
+      (unless (string= installed version)
+        (error "~A: installed version ~A, built ~A" name installed version))
+      (format nil "~A + ~A ~A" (dist-lib-world agent) name version))))
+
+(defun overlay-dependencies (agent overlay feature)
+  "The systems the overlay's branch depends on, read from its .asd
+files with FEATURE (the lisp's) among the features: a branch may want
+releases the dist's release of the project does not (devo's glisp
+wants cl-smtp), and the prefetch must know."
+  (let ((clone (overlay-clone-dir agent overlay)))
+    (when (probe-file (merge-pathnames ".git/" clone))
+      (remove-duplicates
+       (loop for asd in (tg-polyfill:asd-files clone)
+          append (loop for system in (tg-polyfill:read-asd-systems asd feature)
+                    append (rest system)))
+       :test #'string=))))
+
+(defun prefetch (agent manifest-file)
+  "Has the preferred lisp fetch and unpack what the coming pass needs
+into the agent's Quicklisp (installing the Quicklisp first if need
+be): the lisp under test may not be able to download for itself.
+The overlays are cloned here too, so their branches' dependencies
+are among what is fetched."
+  (let ((lisp-exe:*temp-dir* (test-grid-agent:work-dir agent)))
+    (test-grid-agent::update-testing-quicklisp agent "quicklisp"))
+  (dolist (overlay *overlays*)
+    (fetch-overlay agent overlay))
+  (let* ((feature (getf (tg-polyfill:read-manifest manifest-file) :feature))
+         (names (when *projects*
+                  (remove-duplicates
+                   (append *projects*
+                           (mapcar (lambda (overlay) (getf overlay :project)) *overlays*)
+                           (loop for overlay in *overlays* append (overlay-dependencies agent overlay feature)))
+                   :test #'string=))))
+    (format t "~&Prefetching ~:[the whole dist~;~:*~{~A~^, ~} and their dependencies~] ...~%" names)
+    (finish-output)
+    (format t "~&Prefetched: ~A releases installed.~%"
+            (run-in-preferred-lisp agent 7200
+                                   ;; and a fresh local-projects index (see TEST-OVERLAY)
+                                   '(ql:register-local-projects)
+                                   `(cl-user::prefetch-releases ',names)))))
+
+(defun test-polyfilled (agent lib-world)
+  "The whole dist on the polyfilled Quicklisp, or TEST_GRID_PROJECTS
+without marking the lisp tested (the full pass is still owed)."
+  (format t "~&Testing the lib-world ~S~%" lib-world)
+  (finish-output)
+  (test-grid-agent:test-patched-quicklisp agent (quicklisp-dir agent) lib-world
+                                          :project-names *projects*
+                                          :mark-tested (null *projects*)))
+
+;;; The runs: for each agent, the dist, then the overlays; then, for a
+;;; lisp with a polyfill, the polyfilled dist and the overlays again.
 
 (dolist (entry *agents*)
-  (let ((agent (getf entry :agent)))
-    (format t "~&Agent for ~{~A~^, ~}, work directory ~A~%"
-            (getf entry :names) (test-grid-agent:work-dir agent))
+  (let ((agent (getf entry :agent))
+        (manifest (getf entry :polyfill)))
+    (format t "~&Agent for ~{~A~^, ~}, work directory ~A~@[, polyfill ~A~]~%"
+            (getf entry :names) (test-grid-agent:work-dir agent) manifest)
     (finish-output)
     (clear-local-projects agent)
+    (when manifest
+      (remove-polyfill agent manifest)
+      (prefetch agent manifest))
     (test-grid-agent:main agent)
     (dolist (overlay *overlays*)
-      (test-overlay agent overlay))))
+      (test-overlay agent overlay))
+    (when manifest
+      (let ((lib-world (install-polyfill agent manifest)))
+        (prefetch agent manifest)
+        (test-polyfilled agent lib-world)
+        (dolist (overlay *overlays*)
+          (test-overlay agent overlay :base lib-world))))))

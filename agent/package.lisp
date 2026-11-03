@@ -25,7 +25,7 @@
            #:main
            ;; the same run against another Quicklisp directory, as a
            ;; lib-world of its own
-           #:test-patched-quicklisp
+           #:test-patched-quicklisp #:*mark-tested*
 
            ;; DEPRECATED
            #:+api-version+
