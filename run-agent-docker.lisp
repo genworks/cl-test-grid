@@ -139,13 +139,17 @@
                :lisp ,(make-instance 'lisp-exe:cmucl :exe-path "cmucl"))
     ;; The glibc build of EGCL: the musl one is static and cannot
     ;; dlopen, so nothing over CFFI loads there.  Both report the same
-    ;; implementation identifier.  Its polyfill manifest carries Green's
-    ;; EGCL forks of the libraries the stock dist refuses it.  (A
-    ;; "no primary method found" from every quickload on 2026-11-03 was
-    ;; not this image but Quicklisp's client rebuilding the
-    ;; local-projects index on a lisp it has no DIRECTORY-ENTRIES for;
-    ;; the preferred lisp rebuilds it now, see TEST-OVERLAY.)
-    ("egcl"    :image "egcl:0.0.11-trixie-gnu" :arches ("amd64" "arm64") :in-devel t
+    ;; implementation identifier.  Not :in-devel: cl-devel carries the
+    ;; musl build (58097950, 2026-11-03), so EGCL runs from its own
+    ;; image until cl-devel has the glibc one -- at the price of the
+    ;; foreign libraries cl-devel would give it.  Its polyfill manifest
+    ;; carries Green's EGCL forks of the libraries the stock dist
+    ;; refuses it.  (A "no primary method found" from every quickload
+    ;; on 2026-11-03 was not this image but Quicklisp's client
+    ;; rebuilding the local-projects index on a lisp it has no
+    ;; DIRECTORY-ENTRIES for; the preferred lisp rebuilds it now, see
+    ;; TEST-OVERLAY.)
+    ("egcl"    :image "egcl:0.0.11-trixie-gnu" :arches ("amd64" "arm64")
                :polyfill "polyfills/egcl.sexp"
                :lisp ,(make-instance 'lisp-exe:egcl :exe-path "egcl"))
     ("allegro" :image "allegro:11.0express-trixie" :arches ("amd64" "arm64")
