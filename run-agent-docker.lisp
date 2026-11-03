@@ -16,7 +16,10 @@
 ;;;;                            default is every lisp built for this machine
 ;;;;   TEST_GRID_PROJECTS       comma-separated Quicklisp projects, to test
 ;;;;                            only those (for trying the setup out)
-;;;;   TEST_GRID_WORK_DIR       default work-dir/agent/ beside this file
+;;;;   TEST_GRID_WORK_DIR       default work-dir/agent/ beside this file; a
+;;;;                            lisp that needs a Quicklisp of its own
+;;;;                            (:own-quicklisp in *CATALOG*: dotcl) runs
+;;;;                            from an agent of its own under <work dir>/<name>/
 ;;;;   TEST_GRID_MEMORY         --memory of each child container, default 4g
 ;;;;   TEST_GRID_IMAGE_PREFIX   where the images are pulled from; the default
 ;;;;                            is Docker Hub, "clfoundation/".  The same
@@ -109,7 +112,12 @@
     ("clasp"   :image "clasp:3.0.1-trixie" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:clasp :exe-path "clasp")
                :memory "6g")
-    ("dotcl"   :image "dotcl:0.1.36-noble" :arches ("amd64" "arm64")
+    ;; dotcl installs its own Quicklisp dist (patched libraries, served
+    ;; over https) into any Quicklisp it loads, and that dist then takes
+    ;; precedence for every lisp sharing the directory, whose Quicklisp
+    ;; client cannot fetch https: so dotcl gets an agent and a
+    ;; Quicklisp of its own (see *AGENTS* below).
+    ("dotcl"   :image "dotcl:0.1.36-noble" :arches ("amd64" "arm64") :own-quicklisp t
                :lisp ,(make-instance 'lisp-exe:dotcl :exe-path "dotcl"))
     ("cmucl"   :image "cmucl:21f-trixie" :arches ("amd64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:cmucl :exe-path "cmucl"))
@@ -191,41 +199,70 @@
           (uiop:run-program (list "docker" "pull" image)
                             :output t :error-output t)))))
 
-(defparameter *lisps* (mapcar #'docker-lisp *entries*))
+;;; Agents.  The lisps share one agent, one work directory and one
+;;; private Quicklisp, except those marked :own-quicklisp in the
+;;; catalog: each of those gets an agent of its own under
+;;; <work dir>/<name>/, with a lock port of its own (Anton's rule for
+;;; several agents on one machine: different ports, different work
+;;; directories).  They run one after the other.
 
-;; SBCL does the auxiliary work (updating Quicklisp, listing its
-;; projects) when it is among the lisps; otherwise the first one.
-(defparameter *preferred-lisp*
-  (or (let ((sbcl (position "sbcl" *entries* :key #'first :test #'string=)))
-        (and sbcl (nth sbcl *lisps*)))
-      (docker-lisp (find "sbcl" *catalog* :key #'first :test #'string=))))
+(defparameter *user-email*
+  (or (env "TEST_GRID_USER_EMAIL")
+      (error "TEST_GRID_USER_EMAIL is not set")))
 
-(defparameter *agent*
-  (test-grid-agent:make-agent
-   :lisps *lisps*
-   :preferred-lisp *preferred-lisp*
-   :user-email (or (env "TEST_GRID_USER_EMAIL")
-                   (error "TEST_GRID_USER_EMAIL is not set"))
-   :work-dir *work-dir*))
+(defparameter *projects* (env-list "TEST_GRID_PROJECTS"))
 
-(let ((projects (env-list "TEST_GRID_PROJECTS")))
-  (when projects
-    (format t "~&Testing only the projects ~{~A~^, ~}~%" projects)
-    (setf (test-grid-agent::custom-project-names *agent*) projects)))
+(when *projects*
+  (format t "~&Testing only the projects ~{~A~^, ~}~%" *projects*))
 
 (unless (env "CL_TEST_GRID_TOKEN")
   (error "CL_TEST_GRID_TOKEN is not set; the results could not be uploaded"))
 
+(defun make-agent (entries work-dir lock-port)
+  (let* ((lisps (mapcar #'docker-lisp entries))
+         ;; SBCL does the auxiliary work (updating Quicklisp, listing
+         ;; its projects) when it is among the lisps; otherwise one is
+         ;; made for the purpose.
+         (preferred (or (let ((sbcl (position "sbcl" entries :key #'first :test #'string=)))
+                          (and sbcl (nth sbcl lisps)))
+                        (docker-lisp (find "sbcl" *catalog* :key #'first :test #'string=))))
+         (agent (test-grid-agent:make-agent
+                 :lisps lisps
+                 :preferred-lisp preferred
+                 :user-email *user-email*
+                 :work-dir work-dir
+                 :singleton-lock-port lock-port)))
+    (when *projects*
+      (setf (test-grid-agent::custom-project-names agent) *projects*))
+    (list :names (mapcar #'first entries) :agent agent)))
+
+(defparameter *agents*
+  (let ((shared (remove-if (lambda (entry) (getf (rest entry) :own-quicklisp)) *entries*))
+        (own (remove-if-not (lambda (entry) (getf (rest entry) :own-quicklisp)) *entries*))
+        (port 7685))
+    (append (when shared
+              (list (make-agent shared *work-dir* port)))
+            (loop for entry in own
+               collect (make-agent (list entry)
+                                   (merge-pathnames (format nil "~A/" (first entry)) *work-dir*)
+                                   (incf port))))))
+
 ;;; Overlays: a branch of a project's repository in place of the
 ;;; dist's release of it, tested as a lib-world of its own.  The
-;;; clone is kept under the private Quicklisp, so the children's fasl
-;;; translation covers it, and is moved into local-projects/ for its
-;;; pass only: Quicklisp prefers local-projects over the dist, and
-;;; nothing else ever puts anything there.
+;;; clone is kept under the agent's private Quicklisp, so the
+;;; children's fasl translation covers it, and is moved into
+;;; local-projects/ for its pass only: Quicklisp prefers
+;;; local-projects over the dist, and nothing else ever puts anything
+;;; there.
 
-(defparameter *quicklisp-dir* (merge-pathnames "quicklisp/" *work-dir*))
-(defparameter *overlays-dir* (merge-pathnames "overlays/" *quicklisp-dir*))
-(defparameter *local-projects-dir* (merge-pathnames "local-projects/" *quicklisp-dir*))
+(defun quicklisp-dir (agent)
+  (merge-pathnames "quicklisp/" (test-grid-agent:work-dir agent)))
+
+(defun overlays-dir (agent)
+  (merge-pathnames "overlays/" (quicklisp-dir agent)))
+
+(defun local-projects-dir (agent)
+  (merge-pathnames "local-projects/" (quicklisp-dir agent)))
 
 (defun parse-overlay (spec)
   (let ((eq (position #\= spec))
@@ -242,15 +279,15 @@
   (string-trim '(#\Newline #\Return #\Space)
                (uiop:run-program command :output :string :error-output t)))
 
-(defun overlay-clone-dir (overlay)
+(defun overlay-clone-dir (agent overlay)
   (merge-pathnames (format nil "~A@~A/" (getf overlay :project) (getf overlay :branch))
-                   *overlays-dir*))
+                   (overlays-dir agent)))
 
-(defun fetch-overlay (overlay)
+(defun fetch-overlay (agent overlay)
   "Clones the branch, or brings the clone up to date; returns the commit."
-  (let ((dir (overlay-clone-dir overlay))
+  (let ((dir (overlay-clone-dir agent overlay))
         (branch (getf overlay :branch)))
-    (ensure-directories-exist *overlays-dir*)
+    (ensure-directories-exist (overlays-dir agent))
     (if (probe-file (merge-pathnames ".git/" dir))
         (progn
           (run "git" "-C" (namestring dir) "fetch" "--depth" "1" "origin" branch)
@@ -260,46 +297,53 @@
                           :output t :error-output t))
     (run "git" "-C" (namestring dir) "rev-parse" "--short=8" "HEAD")))
 
-(defun dist-lib-world ()
-  "The lib-world name of the private Quicklisp's dist, as the agent names it."
+(defun dist-lib-world (agent)
+  "The lib-world name of the agent's Quicklisp dist, as the agent names it."
   (let (name version)
-    (with-open-file (in (merge-pathnames "dists/quicklisp/distinfo.txt" *quicklisp-dir*))
+    (with-open-file (in (merge-pathnames "dists/quicklisp/distinfo.txt" (quicklisp-dir agent)))
       (loop for line = (read-line in nil)
          while line
          do (cond ((uiop:string-prefix-p "name: " line) (setf name (subseq line 6)))
                   ((uiop:string-prefix-p "version: " line) (setf version (subseq line 9))))))
     (format nil "~A ~A" name version)))
 
-(defun clear-local-projects ()
+(defun clear-local-projects (agent)
   "Nothing of ours stays in local-projects/ between passes; a pass that
 died mid-way may have left its clone there, and it must not be taken
 for the dist."
-  (when (probe-file *local-projects-dir*)
-    (dolist (dir (uiop:subdirectories *local-projects-dir*))
-      (format t "~&Removing ~A left in local-projects/~%" dir)
-      (uiop:delete-directory-tree dir :validate t))
-    (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" *local-projects-dir*))))
+  (let ((local-projects (local-projects-dir agent)))
+    (when (probe-file local-projects)
+      (dolist (dir (uiop:subdirectories local-projects))
+        (format t "~&Removing ~A left in local-projects/~%" dir)
+        (uiop:delete-directory-tree dir :validate t))
+      (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
 
-(defun test-overlay (overlay)
+(defun test-overlay (agent overlay)
   (let* ((project (getf overlay :project))
-         (commit (fetch-overlay overlay))
-         (lib-world (format nil "~A + ~A@~A ~A" (dist-lib-world) project (getf overlay :branch) commit))
-         (clone (overlay-clone-dir overlay))
-         (in-place (merge-pathnames (format nil "~A/" project) *local-projects-dir*)))
+         (commit (fetch-overlay agent overlay))
+         (lib-world (format nil "~A + ~A@~A ~A" (dist-lib-world agent) project (getf overlay :branch) commit))
+         (clone (overlay-clone-dir agent overlay))
+         (local-projects (local-projects-dir agent))
+         (in-place (merge-pathnames (format nil "~A/" project) local-projects)))
     (format t "~&Testing ~A from ~A, branch ~A at ~A, as the lib-world ~S~%"
             project (getf overlay :url) (getf overlay :branch) commit lib-world)
     (finish-output)
-    (ensure-directories-exist *local-projects-dir*)
+    (ensure-directories-exist local-projects)
     (run "mv" (string-right-trim "/" (namestring clone)) (string-right-trim "/" (namestring in-place)))
     (unwind-protect
-         (test-grid-agent:test-patched-quicklisp *agent* *quicklisp-dir* lib-world
+         (test-grid-agent:test-patched-quicklisp agent (quicklisp-dir agent) lib-world
                                                  :project-names (list project))
       (run "mv" (string-right-trim "/" (namestring in-place)) (string-right-trim "/" (namestring clone)))
-      (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" *local-projects-dir*)))))
+      (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
 
-(clear-local-projects)
+;;; The runs: for each agent, the dist, then the overlays.
 
-(test-grid-agent:main *agent*)
-
-(dolist (overlay *overlays*)
-  (test-overlay overlay))
+(dolist (entry *agents*)
+  (let ((agent (getf entry :agent)))
+    (format t "~&Agent for ~{~A~^, ~}, work directory ~A~%"
+            (getf entry :names) (test-grid-agent:work-dir agent))
+    (finish-output)
+    (clear-local-projects agent)
+    (test-grid-agent:main agent)
+    (dolist (overlay *overlays*)
+      (test-overlay agent overlay))))
