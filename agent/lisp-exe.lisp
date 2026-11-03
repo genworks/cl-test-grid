@@ -55,6 +55,9 @@
            ;; used to interact with child lisp processes
            ;; are to be stored
            #:*temp-dir*
+
+           ;; forms put before the agent's in a dotcl child
+           #:*prelude-forms*
            ))
 
 
@@ -421,11 +424,17 @@ command, the rest strings are the command arguments."))
           "--eval" "(require :abcl-contrib)"
           ,@(prepend-each "--eval" form-strings))))
 
+(defvar *prelude-forms* '()
+  "Forms, as strings, evaluated in a dotcl child before the agent's
+own: bound by the driver around a pass that must keep dotcl's own
+Quicklisp dist out (the QL-SETUP preset).  Only dotcl's command line
+honors it.")
+
 ;; dotcl exits after the last --eval.
 (defmethod make-command-line ((lisp-exe dotcl) form-strings)
   (cons (exe-path lisp-exe)
         `("--no-init"
-          ,@(prepend-each "--eval" form-strings))))
+          ,@(prepend-each "--eval" (append *prelude-forms* form-strings)))))
 
 ;; EGCL 0.0.11 takes one --eval (given several, it evaluates the last
 ;; one that many times), so the forms go in one PROGN; it exits after it.

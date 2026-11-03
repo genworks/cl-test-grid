@@ -133,7 +133,12 @@
     ;; precedence for every lisp sharing the directory, whose Quicklisp
     ;; client cannot fetch https: so dotcl gets an agent and a
     ;; Quicklisp of its own (see *AGENTS* below).
+    ;; Its polyfill manifest names that dist as the base (so the
+    ;; stock pass runs with dotcl told to leave it out, and the
+    ;; polyfilled pass in a second private Quicklisp where it installs
+    ;; itself) and layers the grid's own entries over it.
     ("dotcl"   :image "dotcl:0.1.36-noble" :arches ("amd64" "arm64") :own-quicklisp t
+               :polyfill "polyfills/dotcl.sexp"
                :lisp ,(make-instance 'lisp-exe:dotcl :exe-path "dotcl"))
     ("cmucl"   :image "cmucl:21f-trixie" :arches ("amd64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:cmucl :exe-path "cmucl"))
@@ -292,8 +297,15 @@
 ;;; local-projects over the dist, and nothing else ever puts anything
 ;;; there.
 
+(defvar *quicklisp-dir-override* nil
+  "Bound to another private Quicklisp of the agent's work directory
+while a pass runs there: a lisp whose vendor dist installs itself into
+any Quicklisp it touches (dotcl) keeps its stock and polyfilled worlds
+in two.")
+
 (defun quicklisp-dir (agent)
-  (merge-pathnames "quicklisp/" (test-grid-agent:work-dir agent)))
+  (or *quicklisp-dir-override*
+      (merge-pathnames "quicklisp/" (test-grid-agent:work-dir agent))))
 
 (defun overlays-dir (agent)
   (merge-pathnames "overlays/" (quicklisp-dir agent)))
@@ -386,22 +398,33 @@ dist's lib-world or a polyfilled one."
 ;;; agent/proc-install-dist.lisp), removed again before the next stock
 ;;; pass.
 
-(defun run-in-preferred-lisp (agent timeout &rest forms)
-  "Runs FORMS in a child of the agent's preferred lisp with the private
-Quicklisp and agent/proc-install-dist.lisp loaded; the last form's
-value is returned (through a response file, as the agent does it)."
+(defun run-in-lisp (agent lisp-exe timeout &rest forms)
+  "Runs FORMS in a child of LISP-EXE with the agent's private Quicklisp
+and agent/proc-install-dist.lisp loaded; the last form's value is
+returned (through a response file, as the agent does it)."
   ;; the response file must be where the child can write it: under
   ;; the work directory, mounted into the child's container (the agent
   ;; binds this the same way around its own children)
   (let ((lisp-exe:*temp-dir* (test-grid-agent:work-dir agent)))
     (test-grid-agent::with-response-file (response-file)
       (apply #'lisp-exe:run-with-timeout timeout
-             (test-grid-agent::preferred-lisp agent)
+             lisp-exe
              `(load ,(merge-pathnames "setup.lisp" (quicklisp-dir agent)))
              `(load ,(truename (test-grid-agent::src-file "proc-common.lisp")))
              `(load ,(truename (test-grid-agent::src-file "proc-install-dist.lisp")))
              (append (butlast forms)
                      (list `(cl-user::set-response ,response-file ,(car (last forms)))))))))
+
+(defun run-in-preferred-lisp (agent timeout &rest forms)
+  (apply #'run-in-lisp agent (test-grid-agent::preferred-lisp agent) timeout forms))
+
+(defun ensure-quicklisp (agent)
+  "Installs or updates the private Quicklisp at (QUICKLISP-DIR AGENT),
+whichever directory that is at the moment."
+  (let ((lisp-exe:*temp-dir* (test-grid-agent:work-dir agent)))
+    (test-grid-agent::with-value ((test-grid-agent::custom-lib-world agent)
+                                  (list :directory (quicklisp-dir agent)))
+      (test-grid-agent::update-testing-quicklisp agent "quicklisp"))))
 
 (defun refresh-local-projects (agent)
   "Rebuilds the private Quicklisp's local-projects index in the preferred lisp."
@@ -415,18 +438,38 @@ value is returned (through a response file, as the agent does it)."
       (when (run-in-preferred-lisp agent 600 `(cl-user::remove-polyfill-dist ,name))
         (format t "~&Removed the ~A dist before the stock pass.~%" name)))))
 
+(defun vendor-dist-version (agent manifest)
+  "For a manifest with a :vendor-dist, the version of that dist once
+the lisp has installed it into (QUICKLISP-DIR AGENT): the lisp's own
+client does it at its first (ql:setup), and names the dist after
+itself."
+  (let ((lisp (first (test-grid-agent::lisp-exes agent))))
+    (run-in-lisp agent lisp 1800
+                 '(ql:setup)
+                 `(ql-dist:version (ql-dist:dist ,(getf manifest :lisp))))))
+
 (defun install-polyfill (agent manifest-file)
-  "Builds the manifest's dist and installs it over the stock one;
-returns the lib-world name of the polyfilled Quicklisp."
-  (multiple-value-bind (distinfo-url version name)
-      (tg-polyfill:build-dist manifest-file (merge-pathnames "polyfill/" (test-grid-agent:work-dir agent))
-                              :stock-systems-file (merge-pathnames "dists/quicklisp/systems.txt" (quicklisp-dir agent)))
-    (format t "~&Installing ~A ~A into ~A~%" name version (quicklisp-dir agent))
-    (finish-output)
-    (let ((installed (run-in-preferred-lisp agent 1800 `(cl-user::install-polyfill-dist ,name ,distinfo-url))))
-      (unless (string= installed version)
-        (error "~A: installed version ~A, built ~A" name installed version))
-      (format nil "~A + ~A ~A" (dist-lib-world agent) name version))))
+  "Builds the manifest's dist, if it has entries with a source, and
+installs it over the stock one -- and over the vendor dist, for a
+manifest that names one; returns the lib-world name of the polyfilled
+Quicklisp."
+  (let* ((manifest (tg-polyfill:read-manifest manifest-file))
+         (vendor (when (getf manifest :vendor-dist)
+                   (ensure-quicklisp agent)
+                   (let ((version (vendor-dist-version agent manifest)))
+                     (format t "~&~A's own dist, version ~A, is installed in ~A~%"
+                             (getf manifest :lisp) version (quicklisp-dir agent))
+                     version))))
+    (multiple-value-bind (distinfo-url version name)
+        (tg-polyfill:build-dist manifest-file (merge-pathnames "polyfill/" (test-grid-agent:work-dir agent))
+                                :stock-systems-file (merge-pathnames "dists/quicklisp/systems.txt" (quicklisp-dir agent)))
+      (when distinfo-url
+        (format t "~&Installing ~A ~A into ~A~%" name version (quicklisp-dir agent))
+        (finish-output)
+        (let ((installed (run-in-preferred-lisp agent 1800 `(cl-user::install-polyfill-dist ,name ,distinfo-url))))
+          (unless (string= installed version)
+            (error "~A: installed version ~A, built ~A" name installed version))))
+      (format nil "~A + ~A ~@[~A+~]~A" (dist-lib-world agent) name vendor version))))
 
 (defun overlay-dependencies (agent overlay feature)
   "The systems the overlay's branch depends on, read from its .asd
@@ -447,8 +490,7 @@ into the agent's Quicklisp (installing the Quicklisp first if need
 be): the lisp under test may not be able to download for itself.
 The overlays are cloned here too, so their branches' dependencies
 are among what is fetched."
-  (let ((lisp-exe:*temp-dir* (test-grid-agent:work-dir agent)))
-    (test-grid-agent::update-testing-quicklisp agent "quicklisp"))
+  (ensure-quicklisp agent)
   (dolist (overlay *overlays*)
     (fetch-overlay agent overlay))
   (let* ((feature (getf (tg-polyfill:read-manifest manifest-file) :feature))
@@ -479,21 +521,31 @@ without marking the lisp tested (the full pass is still owed)."
 ;;; lisp with a polyfill, the polyfilled dist and the overlays again.
 
 (dolist (entry *agents*)
-  (let ((agent (getf entry :agent))
-        (manifest (getf entry :polyfill)))
+  (let* ((agent (getf entry :agent))
+         (manifest-file (getf entry :polyfill))
+         (manifest (and manifest-file (tg-polyfill:read-manifest manifest-file))))
     (format t "~&Agent for ~{~A~^, ~}, work directory ~A~@[, polyfill ~A~]~%"
-            (getf entry :names) (test-grid-agent:work-dir agent) manifest)
+            (getf entry :names) (test-grid-agent:work-dir agent) manifest-file)
     (finish-output)
-    (clear-local-projects agent)
+    ;; the stock pass: with the lisp told to leave its own dist out,
+    ;; for a lisp that has one
+    (let ((lisp-exe:*prelude-forms* (getf manifest :stock-forms)))
+      (clear-local-projects agent)
+      (when manifest
+        (remove-polyfill agent manifest-file)
+        (prefetch agent manifest-file))
+      (test-grid-agent:main agent)
+      (dolist (overlay *overlays*)
+        (test-overlay agent overlay)))
+    ;; the polyfilled pass: in a second private Quicklisp when the
+    ;; lisp's own dist would otherwise stay in the stock one
     (when manifest
-      (remove-polyfill agent manifest)
-      (prefetch agent manifest))
-    (test-grid-agent:main agent)
-    (dolist (overlay *overlays*)
-      (test-overlay agent overlay))
-    (when manifest
-      (let ((lib-world (install-polyfill agent manifest)))
-        (prefetch agent manifest)
-        (test-polyfilled agent lib-world)
-        (dolist (overlay *overlays*)
-          (test-overlay agent overlay :base lib-world))))))
+      (let ((*quicklisp-dir-override*
+             (when (getf manifest :vendor-dist)
+               (merge-pathnames "polyfilled/quicklisp/" (test-grid-agent:work-dir agent)))))
+        (clear-local-projects agent)
+        (let ((lib-world (install-polyfill agent manifest-file)))
+          (prefetch agent manifest-file)
+          (test-polyfilled agent lib-world)
+          (dolist (overlay *overlays*)
+            (test-overlay agent overlay :base lib-world)))))))

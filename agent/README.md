@@ -137,6 +137,17 @@ entry's stock and polyfilled results side by side in
 release passes: the manifest is meant to shrink to nothing as the
 patches reach upstream.
 
+A lisp whose vendor publishes a dist of patched libraries that the
+lisp installs into any Quicklisp it touches (dotcl) names that dist in
+its manifest (`:vendor-dist`) as the base its entries are layered on,
+and gives the forms that keep the dist out (`:stock-forms`, evaluated
+ahead of everything in each of its children during the stock pass).
+Its stock and polyfilled worlds then live in two private Quicklisps,
+`quicklisp/` and `polyfilled/quicklisp/` under the agent's work
+directory, since a home that once took the vendor dist keeps it; the
+lib-world carries both versions, `quicklisp 2026-01-01 + polyfill-dotcl
+2026-10-27+2026-11-03.eec61f`.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are

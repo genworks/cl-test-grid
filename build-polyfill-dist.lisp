@@ -197,6 +197,9 @@ file's file:// URL, the version and the dist name."
          (distinfo (merge-pathnames "distinfo.txt" dist-dir))
          (url (lambda (file) (format nil "file://~A" (namestring file)))))
     (cond
+      ((null (buildable-entries manifest))
+       (format t "~&Polyfill manifest ~A has no entry with a source: no dist to build.~%" manifest-file)
+       (return-from build-dist (values nil version name)))
       ((probe-file distinfo)
        (format t "~&Polyfill dist ~A ~A is built already.~%" name version))
       (t

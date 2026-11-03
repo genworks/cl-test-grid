@@ -81,12 +81,22 @@
                 (t (format t "~&prefetch: no release or system named ~A~%" name))))))
     (loop for release being the hash-values of releases collect release)))
 
+(defun fetchable-p (release)
+  "Whether this lisp's client can fetch RELEASE: http, or a polyfill
+dist's file URL.  A vendor dist served over https (dotcl's) is left to
+the lisp it belongs to, whose client speaks https."
+  (let ((url (fncall "ql-dist:archive-url" release)))
+    (or (and (>= (length url) 7) (string= "http://" url :end2 7))
+        (and (>= (length url) 7) (string= "file://" url :end2 7)))))
+
 (defun prefetch-releases (release-names)
   "Fetches and unpacks the releases a pass over RELEASE-NAMES (NIL: the
 whole stock dist) can need; returns how many are installed."
-  (let ((releases (if release-names
-                      (release-closure release-names)
-                      (fncall "ql-dist:provided-releases" (fncall "ql-dist:dist" "quicklisp")))))
+  (ensure-file-scheme)
+  (let ((releases (remove-if-not #'fetchable-p
+                                 (if release-names
+                                     (release-closure release-names)
+                                     (fncall "ql-dist:provided-releases" (fncall "ql-dist:dist" "quicklisp"))))))
     (dolist (release releases)
       (fncall "ql-dist:ensure-installed" release))
     (length releases)))
