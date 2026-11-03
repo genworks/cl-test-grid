@@ -61,7 +61,8 @@
                                          (cons (string-downcase keyword)
                                                keyword))
                                        '(:abcl :acl :ccl :clasp :clisp :corman :cmu
-                                         :ecl :gcl :lw :mcl :mkcl :sbcl :scl :symbolics :xcl))
+                                         :dotcl :ecl :egcl :gcl :lw :mcl :mkcl :sbcl :scl
+                                         :symbolics :xcl))
                                :test #'equal))
 
 (defmethod lisp-impl-type ((implementation-identifier string))

@@ -13,9 +13,15 @@
 
 ;; ------ file system location for generated reports ------
 
+(defvar *reports-dir* nil
+  "When set, the directory the reports are written to, instead of
+reports-generated/ beside the source (run-reports-docker.lisp sets it
+to the directory the web server publishes).")
+
 (defun reports-dir ()
-  (merge-pathnames "reports-generated/"
-                   (merge-pathnames #P"../" (src-dir))))
+  (or *reports-dir*
+      (merge-pathnames "reports-generated/"
+                       (merge-pathnames #P"../" (src-dir)))))
 
 (defun reports-root-dir-relative-path (report-file)
   (let ((dir (pathname-directory report-file)))

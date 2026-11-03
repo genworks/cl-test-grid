@@ -32,4 +32,6 @@
   (let* ((distinct (distinct objects (list prop-reader)))
          (flat (alexandria:flatten distinct))
          (sorted (sort flat predicate)))
-    (subseq sorted 0 count)))
+    ;; fewer than COUNT distinct values (a database with a single
+    ;; Quicklisp version, say) is not an error: all of them
+    (subseq sorted 0 (min count (length sorted)))))
