@@ -17,7 +17,21 @@ set -e
 cd "$(dirname "$0")"
 SRC=$(pwd)
 
-[ -f agent.env ] && . ./agent.env
+# agent.env holds this machine's settings; a setting given on the
+# command line (TEST_GRID_LISPS=egcl ./run-agent-docker.sh, or
+# TEST_GRID_DEVEL_IMAGE= to leave cl-devel out for one run) wins over
+# it, so the values already in the environment are kept across the
+# sourcing.
+SETTINGS="TEST_GRID_USER_EMAIL TEST_GRID_LISPS TEST_GRID_PROJECTS TEST_GRID_WORK_DIR TEST_GRID_MEMORY TEST_GRID_IMAGE_PREFIX TEST_GRID_DEVEL_IMAGE TEST_GRID_OVERLAYS TEST_GRID_ALLEGRO_LICENSE_AGREED TEST_GRID_AGENT_IMAGE TEST_GRID_DAEMON_SOCKET CL_TEST_GRID_STORE_URL CL_TEST_GRID_TOKEN DOCKER DOCKER_HOST"
+if [ -f agent.env ]; then
+    for v in $SETTINGS; do
+        eval "[ -n \"\${$v+set}\" ] && keep_$v=\"\$$v\" && kept_$v=1"
+    done
+    . ./agent.env
+    for v in $SETTINGS; do
+        eval "[ -n \"\${kept_$v:-}\" ] && $v=\"\$keep_$v\""
+    done
+fi
 : "${TEST_GRID_WORK_DIR:=$SRC/work-dir/agent}"
 : "${TEST_GRID_AGENT_IMAGE:=clfoundation/ccl:1.14-trixie}"
 : "${DOCKER_CLI_VERSION:=28.5.1}"
