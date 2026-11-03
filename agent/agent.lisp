@@ -26,7 +26,11 @@
    ;; custom-lib-world may be a plist in the form
    ;; (:directory <pathname designator> :id <string>)
    (custom-lib-world :type list :accessor custom-lib-world :initform nil)
-   (custom-project-names :type list :accessor custom-project-names :initform nil)))
+   (custom-project-names :type list :accessor custom-project-names :initform nil)
+   ;; an alist (("project" "system" ...) ...) overriding, for the
+   ;; projects it names, the systems the dist's index lists: a branch
+   ;; tested in place of the dist's release carries its own list
+   (custom-project-systems :type list :accessor custom-project-systems :initform nil)))
 
 ;;; Now the LISPS property of agent may contain
 ;;; not only LISP-EXE as elements, but also
@@ -357,6 +361,15 @@ pass must still happen (a polyfilled dist tried out).")
                 (init-project-lister (preferred-lisp agent)
                                      (private-quicklisp-dir agent)
                                      ql-dist))
+          ;; a project whose systems the caller knows better than the
+          ;; dist's index (an overlay's branch) gets its list
+          (dolist (override (custom-project-systems agent))
+            (let ((lister (project-lister agent)))
+              (setf (project-systems-alist lister)
+                    (sorted-project-systems-alist
+                     (cons (cons (string-downcase (first override)) (rest override))
+                           (remove (string-downcase (first override)) (project-systems-alist lister)
+                                   :key #'first :test #'string=))))))
           ;; now do the work
           (run-tests agent lib-world)))))
   (log:info "Agent is done. Bye."))
@@ -374,9 +387,14 @@ pass must still happen (a polyfilled dist tried out).")
               ,@body)
          (setf ,place ,old)))))
 
-(defun test-patched-quicklisp (agent quicklisp-dir lib-world-id &key project-names (mark-tested t))
+(defun test-patched-quicklisp (agent quicklisp-dir lib-world-id
+                               &key project-names project-systems (mark-tested t))
+  "PROJECT-SYSTEMS: an alist ((\"project\" \"system\" ...) ...) of the
+systems to test for projects whose list the dist's index does not
+give (an overlay's branch)."
   (let ((*mark-tested* mark-tested))
     (with-value ((custom-lib-world agent)
                  (list :directory quicklisp-dir :id lib-world-id))
       (with-value ((custom-project-names agent) project-names)
-        (main agent)))))
+        (with-value ((custom-project-systems agent) project-systems)
+          (main agent))))))

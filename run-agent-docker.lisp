@@ -367,6 +367,16 @@ for the dist."
         (uiop:delete-directory-tree dir :validate t))
       (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
 
+(defun branch-systems (dir)
+  "The systems a checkout defines, from its .asd files (a retired
+.asd.retired is not one), read without evaluation and with no lisp's
+feature in particular."
+  (sort (remove-duplicates
+         (loop for asd in (tg-polyfill:asd-files dir)
+            append (mapcar #'first (tg-polyfill:read-asd-systems asd :cl-test-grid)))
+         :test #'string=)
+        #'string<))
+
 (defun test-overlay (agent overlay &key (base (dist-lib-world agent)))
   "Tests OVERLAY's project from its branch as a lib-world over BASE, the
 dist's lib-world or a polyfilled one."
@@ -388,7 +398,12 @@ dist's lib-world or a polyfilled one."
     (refresh-local-projects agent)
     (unwind-protect
          (test-grid-agent:test-patched-quicklisp agent (quicklisp-dir agent) lib-world
-                                                 :project-names (list project))
+                                                 :project-names (list project)
+                                                 ;; the branch's own systems, not the
+                                                 ;; dist's list for the release (a
+                                                 ;; system the branch retired would be
+                                                 ;; answered by the dist's copy)
+                                                 :project-systems (list (cons project (branch-systems in-place))))
       (run "mv" (string-right-trim "/" (namestring in-place)) (string-right-trim "/" (namestring clone)))
       (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
 
