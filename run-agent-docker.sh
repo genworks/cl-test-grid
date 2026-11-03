@@ -42,7 +42,15 @@ fi
 # /var/run/docker.sock whatever DOCKER_HOST says on this side.
 : "${TEST_GRID_DAEMON_SOCKET:=/var/run/docker.sock}"
 
+# The open-files limit is pinned (soft 1024, hard 1048576, the usual
+# Linux defaults) because CCL starts every child process by closing
+# each descriptor from 3 up to the soft limit, one close() at a time,
+# before the exec.  Some daemons give containers a soft limit of
+# 1073741816, and then every docker command the agent runs sits in
+# that loop for the best part of an hour, looking hung.  The children
+# get the same limit from run-agent-docker.lisp.
 exec "$DOCKER" run --rm --name test-grid-agent \
+    --ulimit nofile=1024:1048576 \
     --volume "$TEST_GRID_DAEMON_SOCKET:/var/run/docker.sock" \
     --volume "$CLI:/usr/local/bin/docker:ro" \
     --volume "$SRC:$SRC" \

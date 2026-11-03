@@ -108,7 +108,13 @@
                    :image (concatenate 'string *image-prefix* image)
                    :docker-lisp lisp
                    :volumes (list *this-dir* *work-dir*)
-                   :docker-run-args (append (list "--memory" memory)
+                   ;; The open-files limit is pinned because CCL starts a
+                   ;; child by closing every descriptor up to the soft
+                   ;; limit, one close() each, before the exec; a daemon
+                   ;; whose default is a billion makes every run-program
+                   ;; take an hour (see run-agent-docker.sh).
+                   :docker-run-args (append (list "--memory" memory
+                                                  "--ulimit" "nofile=1024:1048576")
                                             run-args))))
 
 (defun selected-entries ()
