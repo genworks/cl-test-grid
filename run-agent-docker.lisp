@@ -133,15 +133,23 @@
 
 ;; Pull the images first: a pull inside a child's run would count
 ;; against that child's timeout (the configuration check gives 60 s).
+;; An image already here is not pulled again: the tags are pinned, so
+;; it is the right one, and a registry's rate limit counts even the
+;; pull of an image that is up to date.
 (dolist (entry *entries*)
   (let ((image (concatenate 'string *image-prefix* (getf (rest entry) :image))))
-    (format t "~&Pulling ~A ...~%" image)
-    (finish-output)
-    ;; not --quiet: a full image is over a gigabyte, and the layer
-    ;; status lines are the only sign of life while it downloads and
-    ;; extracts
-    (uiop:run-program (list "docker" "pull" image)
-                      :output t :error-output t)))
+    (if (zerop (nth-value 2 (uiop:run-program (list "docker" "image" "inspect" image)
+                                              :ignore-error-status t
+                                              :output nil :error-output nil)))
+        (format t "~&~A is here already.~%" image)
+        (progn
+          (format t "~&Pulling ~A ...~%" image)
+          (finish-output)
+          ;; not --quiet: a full image is over a gigabyte, and the layer
+          ;; status lines are the only sign of life while it downloads
+          ;; and extracts
+          (uiop:run-program (list "docker" "pull" image)
+                            :output t :error-output t)))))
 
 (defparameter *lisps* (mapcar #'docker-lisp *entries*))
 
