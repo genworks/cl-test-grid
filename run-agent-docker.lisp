@@ -22,6 +22,15 @@
 ;;;;                            is Docker Hub, "clfoundation/".  The same
 ;;;;                            tags are on common-lisp.net's registry:
 ;;;;                            "containers.common-lisp.net/cl-docker-images/"
+;;;;   TEST_GRID_DEVEL_IMAGE    an image carrying many lisps and the foreign
+;;;;                            libraries Quicklisp's own build host has,
+;;;;                            under the prefix, e.g. "cl-devel:58097950"
+;;;;                            (clfoundation/cl-devel; prefer its commit
+;;;;                            tag to trixie or latest, so a run's
+;;;;                            environment is known).  Every lisp marked
+;;;;                            :in-devel below runs from it instead of its
+;;;;                            own image, so systems that load a C library
+;;;;                            through CFFI find it; the others keep theirs.
 ;;;;   TEST_GRID_ALLEGRO_LICENSE_AGREED
 ;;;;                            "yes" once you have read and agreed to the
 ;;;;                            Allegro CL Free Express Edition license
@@ -71,41 +80,52 @@
 ;;; identifier, and the agent tests it afresh on the same Quicklisp.
 ;;; :image is the name under the prefix (Docker Hub's clfoundation/,
 ;;; or common-lisp.net's registry, which carries the same tags);
-;;; :arches says where the image is built.
+;;; :arches says where the image is built; :in-devel that cl-devel
+;;; carries the lisp too.
 (defparameter *image-prefix* (env "TEST_GRID_IMAGE_PREFIX" "clfoundation/"))
 
+(defparameter *devel-image* (env "TEST_GRID_DEVEL_IMAGE"))
+
 (defparameter *catalog*
-  `(("sbcl"    :image "sbcl:2.6.10-trixie" :arches ("amd64" "arm64")
+  `(("sbcl"    :image "sbcl:2.6.10-trixie" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:sbcl :exe-path "sbcl"))
-    ("ccl"     :image "ccl:1.14-trixie" :arches ("amd64" "arm64")
+    ("ccl"     :image "ccl:1.14-trixie" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:ccl :exe-path "ccl"))
-    ("ecl"     :image "ecl:26.5.5-trixie" :arches ("amd64" "arm64")
+    ("ecl"     :image "ecl:26.5.5-trixie" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:ecl :exe-path "ecl" :compiler :lisp-to-c))
-    ("abcl"    :image "abcl:1.9.3-noble-jdk-21" :arches ("amd64" "arm64")
+    ("abcl"    :image "abcl:1.9.3-noble-jdk-21" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:abcl-launcher :exe-path "abcl"))
-    ("clisp"   :image "clisp:2.49.92-trixie" :arches ("amd64" "arm64")
+    ("clisp"   :image "clisp:2.49.92-trixie" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:clisp :exe-path "clisp"))
-    ("clasp"   :image "clasp:3.0.1-trixie" :arches ("amd64" "arm64")
+    ("clasp"   :image "clasp:3.0.1-trixie" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:clasp :exe-path "clasp")
                :memory "6g")
     ("dotcl"   :image "dotcl:0.1.36-noble" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:dotcl :exe-path "dotcl"))
-    ("cmucl"   :image "cmucl:21f-trixie" :arches ("amd64")
+    ("cmucl"   :image "cmucl:21f-trixie" :arches ("amd64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:cmucl :exe-path "cmucl"))
-    ("egcl"    :image "egcl:0.0.11-trixie" :arches ("amd64" "arm64")
+    ("egcl"    :image "egcl:0.0.11-trixie" :arches ("amd64" "arm64") :in-devel t
                :lisp ,(make-instance 'lisp-exe:egcl :exe-path "egcl"))
     ("allegro" :image "allegro:11.0express-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:acl :exe-path "alisp")
                :run-args ("--env" "I_AGREE_TO_ALLEGRO_EXPRESS_LICENSE=yes")
                :needs-license t)))
 
+(defun devel-p (entry)
+  "True when ENTRY's lisp runs from *DEVEL-IMAGE*."
+  (and *devel-image* (getf (rest entry) :in-devel)))
+
+(defun entry-image (entry)
+  (concatenate 'string *image-prefix*
+               (if (devel-p entry) *devel-image* (getf (rest entry) :image))))
+
 (defun docker-lisp (entry)
-  (destructuring-bind (name &key image lisp (memory (env "TEST_GRID_MEMORY" "4g")) run-args
+  (destructuring-bind (name &key lisp (memory (env "TEST_GRID_MEMORY" "4g")) run-args
                        &allow-other-keys)
       entry
     (declare (ignore name))
     (make-instance 'lisp-exe:docker
-                   :image (concatenate 'string *image-prefix* image)
+                   :image (entry-image entry)
                    :docker-lisp lisp
                    :volumes (list *this-dir* *work-dir*)
                    ;; The open-files limit is pinned because CCL starts a
@@ -115,6 +135,11 @@
                    ;; take an hour (see run-agent-docker.sh).
                    :docker-run-args (append (list "--memory" memory
                                                   "--ulimit" "nofile=1024:1048576")
+                                            ;; cl-devel runs as its user cl (uid
+                                            ;; 1000); the work directory belongs
+                                            ;; to root, as in the other images
+                                            (when (devel-p entry)
+                                              (list "--user" "0:0"))
                                             run-args))))
 
 (defun selected-entries ()
@@ -143,7 +168,7 @@
 ;; it is the right one, and a registry's rate limit counts even the
 ;; pull of an image that is up to date.
 (dolist (entry *entries*)
-  (let ((image (concatenate 'string *image-prefix* (getf (rest entry) :image))))
+  (let ((image (entry-image entry)))
     (if (zerop (nth-value 2 (uiop:run-program (list "docker" "image" "inspect" image)
                                               :ignore-error-status t
                                               :output nil :error-output nil)))

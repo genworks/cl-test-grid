@@ -93,6 +93,17 @@ catalog of images and reads the settings (your email, your token, which
 lisps, which projects) from the environment or from an _agent.env_ file
 beside it.
 
+The clfoundation images carry one implementation each and none of the C
+libraries that some Quicklisp systems load through CFFI, so those
+systems fail there on a missing library rather than on the lisp. Set
+`TEST_GRID_DEVEL_IMAGE` to a tag of `clfoundation/cl-devel` (for
+example `cl-devel:58097950`, a commit tag, so the environment of a run is
+known) and every lisp that image carries runs from it instead: it holds
+SBCL, CCL, ECL, ABCL, CLISP, Clasp, EGCL and, on amd64, CMUCL, beside
+the package list of Quicklisp's own build host. dotcl and Allegro keep
+their own images. CMUCL is a 32-bit lisp and still cannot load those
+64-bit libraries.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are

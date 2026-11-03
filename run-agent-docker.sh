@@ -59,6 +59,7 @@ exec "$DOCKER" run --rm --name test-grid-agent \
     --env TEST_GRID_WORK_DIR="$TEST_GRID_WORK_DIR" \
     --env TEST_GRID_USER_EMAIL --env TEST_GRID_LISPS --env TEST_GRID_PROJECTS \
     --env TEST_GRID_MEMORY --env TEST_GRID_ALLEGRO_LICENSE_AGREED --env TEST_GRID_IMAGE_PREFIX \
+    --env TEST_GRID_DEVEL_IMAGE \
     --env CL_TEST_GRID_STORE_URL --env CL_TEST_GRID_TOKEN \
     "$TEST_GRID_AGENT_IMAGE" \
     ccl --batch --load "$SRC/run-agent-docker.lisp" --eval "(ccl:quit)"
