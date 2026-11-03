@@ -18,6 +18,10 @@
 ;;;;                            only those (for trying the setup out)
 ;;;;   TEST_GRID_WORK_DIR       default work-dir/agent/ beside this file
 ;;;;   TEST_GRID_MEMORY         --memory of each child container, default 4g
+;;;;   TEST_GRID_IMAGE_PREFIX   where the images are pulled from; the default
+;;;;                            is Docker Hub, "clfoundation/".  The same
+;;;;                            tags are on common-lisp.net's registry:
+;;;;                            "containers.common-lisp.net/cl-docker-images/"
 ;;;;   TEST_GRID_ALLEGRO_LICENSE_AGREED
 ;;;;                            "yes" once you have read and agreed to the
 ;;;;                            Allegro CL Free Express Edition license
@@ -65,28 +69,32 @@
 ;;; Which image carries each lisp, and how it is started inside.
 ;;; Image tags are pinned: a new tag is a new implementation
 ;;; identifier, and the agent tests it afresh on the same Quicklisp.
+;;; :image is the name under the prefix (Docker Hub's clfoundation/,
+;;; or common-lisp.net's registry, which carries the same tags);
 ;;; :arches says where the image is built.
+(defparameter *image-prefix* (env "TEST_GRID_IMAGE_PREFIX" "clfoundation/"))
+
 (defparameter *catalog*
-  `(("sbcl"    :image "clfoundation/sbcl:2.6.10-trixie" :arches ("amd64" "arm64")
+  `(("sbcl"    :image "sbcl:2.6.10-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:sbcl :exe-path "sbcl"))
-    ("ccl"     :image "clfoundation/ccl:1.14-trixie" :arches ("amd64" "arm64")
+    ("ccl"     :image "ccl:1.14-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:ccl :exe-path "ccl"))
-    ("ecl"     :image "clfoundation/ecl:26.5.5-trixie" :arches ("amd64" "arm64")
+    ("ecl"     :image "ecl:26.5.5-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:ecl :exe-path "ecl" :compiler :lisp-to-c))
-    ("abcl"    :image "clfoundation/abcl:1.9.3-noble-jdk-21" :arches ("amd64" "arm64")
+    ("abcl"    :image "abcl:1.9.3-noble-jdk-21" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:abcl-launcher :exe-path "abcl"))
-    ("clisp"   :image "clfoundation/clisp:2.49.92-trixie" :arches ("amd64" "arm64")
+    ("clisp"   :image "clisp:2.49.92-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:clisp :exe-path "clisp"))
-    ("clasp"   :image "clfoundation/clasp:3.0.1-trixie" :arches ("amd64" "arm64")
+    ("clasp"   :image "clasp:3.0.1-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:clasp :exe-path "clasp")
                :memory "6g")
-    ("dotcl"   :image "clfoundation/dotcl:0.1.36-noble" :arches ("amd64" "arm64")
+    ("dotcl"   :image "dotcl:0.1.36-noble" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:dotcl :exe-path "dotcl"))
-    ("cmucl"   :image "clfoundation/cmucl:21f-trixie" :arches ("amd64")
+    ("cmucl"   :image "cmucl:21f-trixie" :arches ("amd64")
                :lisp ,(make-instance 'lisp-exe:cmucl :exe-path "cmucl"))
-    ("egcl"    :image "clfoundation/egcl:0.0.11-trixie" :arches ("amd64")
+    ("egcl"    :image "egcl:0.0.11-trixie" :arches ("amd64")
                :lisp ,(make-instance 'lisp-exe:egcl :exe-path "egcl"))
-    ("allegro" :image "clfoundation/allegro:11.0express-trixie" :arches ("amd64" "arm64")
+    ("allegro" :image "allegro:11.0express-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:acl :exe-path "alisp")
                :run-args ("--env" "I_AGREE_TO_ALLEGRO_EXPRESS_LICENSE=yes")
                :needs-license t)))
@@ -97,7 +105,7 @@
       entry
     (declare (ignore name))
     (make-instance 'lisp-exe:docker
-                   :image image
+                   :image (concatenate 'string *image-prefix* image)
                    :docker-lisp lisp
                    :volumes (list *this-dir* *work-dir*)
                    :docker-run-args (append (list "--memory" memory)
@@ -126,7 +134,7 @@
 ;; Pull the images first: a pull inside a child's run would count
 ;; against that child's timeout (the configuration check gives 60 s).
 (dolist (entry *entries*)
-  (let ((image (getf (rest entry) :image)))
+  (let ((image (concatenate 'string *image-prefix* (getf (rest entry) :image))))
     (format t "~&Pulling ~A ...~%" image)
     (finish-output)
     ;; not --quiet: a full image is over a gigabyte, and the layer
