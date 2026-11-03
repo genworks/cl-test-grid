@@ -37,11 +37,13 @@ if [ ! -x "$CLI" ]; then
         | tar -xz -C "$(dirname "$CLI")" --strip-components=1 docker/docker
 fi
 
-SOCKET=${DOCKER_HOST#unix://}
-[ -S "$SOCKET" ] || SOCKET=/var/run/docker.sock
+# The daemon's socket, as a path the DAEMON can bind-mount: under
+# colima or Docker Desktop the daemon runs in a VM, where its socket is
+# /var/run/docker.sock whatever DOCKER_HOST says on this side.
+: "${TEST_GRID_DAEMON_SOCKET:=/var/run/docker.sock}"
 
 exec "$DOCKER" run --rm --name test-grid-agent \
-    --volume "$SOCKET:/var/run/docker.sock" \
+    --volume "$TEST_GRID_DAEMON_SOCKET:/var/run/docker.sock" \
     --volume "$CLI:/usr/local/bin/docker:ro" \
     --volume "$SRC:$SRC" \
     --volume "$TEST_GRID_WORK_DIR:$TEST_GRID_WORK_DIR" \
