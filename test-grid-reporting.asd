@@ -34,6 +34,7 @@
      (:file "regressions")
      (:file "meta-info-from-quicklisp")
      (:file "dependencies-and-blockers")
+     (:file "exercised")
      (:file "load-failures")
      (:file "compiler-diff")
      (:file "demo-reports")

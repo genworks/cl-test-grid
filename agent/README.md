@@ -192,6 +192,16 @@ test (`TEST_GRID_OVERLAYS`) and the polyfills are configuration too:
 a volunteer who sets neither tests the dist as published, and nothing
 else.
 
+Every load test records what it pulled in: the projects ASDF loaded
+on the way to the system under test, on success or on the way to a
+failure, as `:loaded` in the load result (since 2026-11-04).  The
+reports count them: a library's page says how many loads of other
+systems pulled it in, per implementation and lib-world, and how many
+of those loads failed, beside the static count of the dist's projects
+that depend on it, direct and transitive, from the dist's own index.
+A library with no test suite is still exercised that way, thousands of
+times over a dist.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are

@@ -90,6 +90,8 @@
 
 ;;; The reports
 (setf test-grid-reporting::*reports-dir* *reports-dir*)
+;; the dependency tables from the current dist, for the library pages
+(test-grid-reporting::use-dist-index)
 (test-grid-reporting::generate-reports (tg-storage:data *replica*))
 
 (defun polyfill-summaries ()

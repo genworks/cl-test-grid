@@ -28,6 +28,8 @@
     <ul>
         <li><a href="#results-for-last-two-qls">Results on the last two Quicklisp distributions</a></li>
         <li><a href="#breakdown-by-testcases">Breakdown by testcases</a></li>
+        <li><a href="#dependents">Who depends on it</a></li>
+        <li><a href="#exercised">Pulled in by other systems' loads</a></li>
     </ul>
     <h3 id="results-for-last-two-qls">Results on the last two Quicklisp distributions</h3>
     <!-- jquery.thead for some reason wants the table to have a parent element with some CSS class -->
@@ -39,6 +41,12 @@
     <div class="dummy-class-for-jquery-thead"> 
         <!-- TMPL_VAR resuts-by-testcases -->
     </div>
-    <p><a href="https://github.com/cl-test-grid/cl-test-grid/tree/master/reporting/#readme" class="to-overview">To reports overview</a></p>
+    <h3 id="dependents">Who depends on it</h3>
+    <!-- TMPL_VAR dependents -->
+    <h3 id="exercised">Pulled in by other systems' loads</h3>
+    <div class="dummy-class-for-jquery-thead">
+        <!-- TMPL_VAR exercised -->
+    </div>
+    <p><a href="<!-- TMPL_VAR reports-root-dir-relative-path -->index.html" class="to-overview">To reports overview</a></p>
     <p class="timestamp">Generated at: <!-- TMPL_VAR time --> GMT.</p>
 </body></html>

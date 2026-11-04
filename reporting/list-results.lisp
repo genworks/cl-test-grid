@@ -133,6 +133,10 @@ Returns the outcome part of the result-spec."
       (:whole-test-suite (second result-spec))
       (otherwise (third result-spec)))))
 
+(defmethod loaded-projects ((item list))
+  "The projects a load test recorded pulling in (:loaded; since 2026-11-04)."
+  (getf item :loaded))
+
 (defun failure-p (result)
   (case (result-spec-outcome result)
     ((:fail :crash :timeout :known-fail :unexpected-ok :no-resource) t)))

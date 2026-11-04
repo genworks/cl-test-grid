@@ -225,12 +225,13 @@ NEW-KEY-VALS are new key-values for descriptions of that test runs."
                                                                  (getf load-result :system)))
                                                   (format nil "~~%~~~Dt" (+ indent 27))
                                                   (lambda (load-result)
-                                                    (format out "(:system ~s :status ~s :log-blob-key ~s :log-byte-length ~s :load-duration ~s"
+                                                    (format out "(:system ~s :status ~s :log-blob-key ~s :log-byte-length ~s :load-duration ~s~@[ :loaded ~s~]"
                                                             (getf load-result :system)
                                                             (getf load-result :status)
                                                             (getf load-result :log-blob-key)
                                                             (getf load-result :log-byte-length)
-                                                            (getf load-result :load-duration))
+                                                            (getf load-result :load-duration)
+                                                            (getf load-result :loaded))
                                                     (when (getf load-result :fail-condition-type)
                                                       (format out
                                                               " :fail-condition-type ~s :fail-condition-text ~s"
