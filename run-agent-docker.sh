@@ -13,6 +13,10 @@
 # Example crontab line, once a day:
 #   0 3 * * * /home/testgrid/cl-test-grid/run-agent-docker.sh >> /home/testgrid/cl-test-grid/work-dir/cron.log 2>&1
 #
+# On a fresh clone make work-dir/ first (`mkdir -p work-dir`) if the
+# output is redirected into it: the shell opens the log before this
+# script can create the directory.
+#
 # One agent tests its lisps one after the other.  TEST_GRID_PARALLEL=N
 # runs the lisps of TEST_GRID_LISPS as N agents at a time instead, one
 # container per lisp (test-grid-agent-<lisp>), each with a work
