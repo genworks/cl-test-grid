@@ -42,6 +42,7 @@
                         test-grid-data:remove-test-runs
                         test-grid-data:remove-lib-results
                         test-grid-data:claim-test-run
+                        test-grid-data:release-claims
                         test-grid-data::schema-change-006
                         test-grid-data:update-run-descr)))
 

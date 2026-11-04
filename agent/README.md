@@ -171,7 +171,11 @@ otherwise it records a claim of its own and goes ahead.  So several
 machines, ours and volunteers', share the catalog without doing the same
 lisp on the same dist twice, and a machine that joins late finds only
 what is left.  `TEST_GRID_COORDINATE=no` switches that off, which a
-host must say to redo a pair it already has in the storage.
+host must say to redo a pair it already has in the storage.  An agent
+that dies resumes its own claim when started again from the same work
+directory; one that will not be back has its claims released by
+_store-release-claims.sh_ (by agent id, implementation or lib-world),
+or they expire on their own after two days.
 
 Volunteering a machine
 ----------------------

@@ -15,6 +15,7 @@
    #:add-test-runs
    #:remove-test-runs
    #:claim-test-run
+   #:release-claims
    #:remove-lib-results
    #:update-run-descr))
 
@@ -98,6 +99,21 @@ its pair is in the DB, and one older than a week is dropped here."
                    (cons claim
                          (remove-if (lambda (c) (< (getf c :time) cutoff))
                                     (getf db :claims))))))
+
+(defun claim-matcher (key-val-plist)
+  "A predicate on claims: every key in KEY-VAL-PLIST equal."
+  (let ((key-val-alist (alexandria:plist-alist key-val-plist)))
+    (lambda (claim)
+      (every (lambda (key-val-cons)
+               (equal (getf claim (car key-val-cons)) (cdr key-val-cons)))
+             key-val-alist))))
+
+(defun release-claims (db &rest key-val-plist)
+  "Drops the claims matching KEY-VAL-PLIST (:agent-id, :lisp,
+:lib-world): an agent that died and will not be back frees its pairs
+now instead of when its claims go stale."
+  (updated-plist db :claims (remove-if (claim-matcher key-val-plist)
+                                       (getf db :claims))))
 
 (defun update-run-descr (db descr-key-val-plist new-key-vals)
   "DESCR-KEY-VAL-PLIST specifies what test run(s) to update.

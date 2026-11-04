@@ -9,7 +9,15 @@ set -e
 cd "$(dirname "$0")"
 SRC=$(pwd)
 
+# agent.env is read for the token and the server; a value already in
+# the environment wins over it (the agent wrapper does the same)
+for v in TEST_GRID_WORK_DIR CL_TEST_GRID_TOKEN CL_TEST_GRID_STORE_URL DOCKER DOCKER_HOST; do
+    eval "if [ -n \"\${$v+set}\" ]; then keep_$v=\"\$$v\"; kept_$v=1; fi"
+done
 [ -f agent.env ] && . ./agent.env
+for v in TEST_GRID_WORK_DIR CL_TEST_GRID_TOKEN CL_TEST_GRID_STORE_URL DOCKER DOCKER_HOST; do
+    eval "if [ -n \"\${kept_$v:-}\" ]; then $v=\"\$keep_$v\"; fi; if [ -n \"\${$v+set}\" ]; then export $v; fi"
+done
 : "${TEST_GRID_WORK_DIR:=$SRC/work-dir/reports}"
 : "${TEST_GRID_AGENT_IMAGE:=clfoundation/ccl:1.14-trixie}"
 : "${DOCKER:=docker}"
