@@ -94,7 +94,8 @@ just passed to the QUICKLISP:QUICKLOAD."
     :cl-6502            #| :doplus |#            :nst                 :track-best
  #| :cleric |#          #| :cl-erlang-term |#    :stmx                :cl-epmd
     :bencode               :jsown                :nibbles             :cl-custom-hash-table
-    :hyperluminal-mem      :cl-python            :cl-slug             :cl+ssl)
+    :hyperluminal-mem      :cl-python            :cl-slug             :cl+ssl
+    :gendl)
   "All the libraries, testsuites of which we know how to run.")
 
 (defun try-quickload (system-name)
@@ -1339,4 +1340,30 @@ https://github.com/flambard/cl-erlang-term/issues/6
                             (error condition))))
     (ql:quickload :cl+ssl.test)
     (run-fiveam-test-suite :cl+ssl)))
+
+;;; Gendl's regression suite is the system REGRESSION in the gendl
+;;; repository's regression/ tree, written in LIFT.  This is the
+;;; sequence Gendl's own CI runs (docker/impl-tests.lisp,
+;;; docker/build-build/pipeline-tests.lisp): Gendl loaded and started
+;;; (START-GDL! initializes what the tests' objects need), the
+;;; regression system loaded, its LIFT tests defined from the
+;;; registered test definitions (one per definition, named after it,
+;;; comparing a fresh computation with the seed data kept in the
+;;; tree), then the suite run.  Test names come out as
+;;; "gdl-regression-tests.<definition>", stable across runs.  The
+;;; regression system needs Batten (Gendl's NURBS kernel), which no
+;;; Quicklisp dist carries: an overlay set with batten beside gendl,
+;;; or a polyfill entry for it, is what makes this load.  On a lisp
+;;; whose LIFT has no GET-BACKTRACE-AS-STRING (dotcl, ECL on the stock
+;;; dist) the first test that signals ends the run, which shows as a
+;;; serious condition, so a failure.  (The adapter came from the dotcl
+;;; session, 2026-11-03, proven on SBCL 2.6.10 and dotcl 0.1.36 against
+;;; gendl devo 4d1b5d43: 19 tests, none failing.)
+(defmethod libtest ((library-name (eql :gendl)))
+  ;; The test framework used: LIFT.
+  (ql:quickload :gendl)
+  (fncall "gdl:start-gdl!")
+  (ql:quickload :regression)
+  (fncall "gdl-lift-utils:define-regression-tests")
+  (run-lift-test-suite (read-from-string "gdl-lift-utils::gdl-regression-tests")))
 

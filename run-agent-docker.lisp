@@ -46,8 +46,15 @@
 ;;;;                            with that branch in place of the dist's
 ;;;;                            release of the project; a new commit on the
 ;;;;                            branch is a new lib-world, tested afresh.
-;;;;                            TEST_GRID_LISPS applies; TEST_GRID_PROJECTS
-;;;;                            does not (an overlay tests its project).
+;;;;                            Members joined by + form a SET tested
+;;;;                            together, for a branch that needs another
+;;;;                            project the dist lacks:
+;;;;                            gendl=...#devo+batten=...#devo is the
+;;;;                            lib-world "<dist> + gendl@devo <c>+batten@devo <c>".
+;;;;                            The systems tested are those the branches'
+;;;;                            own .asd files define.  TEST_GRID_LISPS
+;;;;                            applies; TEST_GRID_PROJECTS does not (an
+;;;;                            overlay tests its projects).
 ;;;;
 ;;;; Polyfills (no setting; the catalog).  A lisp whose entry names a
 ;;;; manifest (:polyfill "polyfills/<lisp>.sexp") is tested twice: on
@@ -322,7 +329,15 @@ in two.")
           :url (subseq spec (1+ eq) hash)
           :branch (subseq spec (1+ hash)))))
 
-(defparameter *overlays* (mapcar #'parse-overlay (env-list "TEST_GRID_OVERLAYS")))
+(defun parse-overlay-set (spec)
+  "An overlay is a SET of members, <project>=<url>#<branch> joined by +,
+tested together in one lib-world: gendl's branch beside the batten it
+needs, say."
+  (mapcar #'parse-overlay (uiop:split-string spec :separator "+")))
+
+(defparameter *overlays* (mapcar #'parse-overlay-set (env-list "TEST_GRID_OVERLAYS")))
+
+(defun overlay-members (overlay) overlay)
 
 (defun run (&rest command)
   (string-trim '(#\Newline #\Return #\Space)
@@ -372,39 +387,49 @@ for the dist."
 .asd.retired is not one), read without evaluation and with no lisp's
 feature in particular."
   (sort (remove-duplicates
-         (loop for asd in (tg-polyfill:asd-files dir)
+         (loop for asd in (tg-polyfill:asd-files (uiop:ensure-directory-pathname dir))
             append (mapcar #'first (tg-polyfill:read-asd-systems asd :cl-test-grid)))
          :test #'string=)
         #'string<))
 
 (defun test-overlay (agent overlay &key (base (dist-lib-world agent)))
-  "Tests OVERLAY's project from its branch as a lib-world over BASE, the
-dist's lib-world or a polyfilled one."
-  (let* ((project (getf overlay :project))
-         (commit (fetch-overlay agent overlay))
-         (lib-world (format nil "~A + ~A@~A ~A" base project (getf overlay :branch) commit))
-         (clone (overlay-clone-dir agent overlay))
+  "Tests OVERLAY's members from their branches, together, as a
+lib-world over BASE, the dist's lib-world or a polyfilled one."
+  (let* ((members (overlay-members overlay))
+         (commits (mapcar (lambda (member) (fetch-overlay agent member)) members))
+         (lib-world (format nil "~A + ~{~A~^+~}" base
+                            (loop for member in members for commit in commits
+                               collect (format nil "~A@~A ~A" (getf member :project) (getf member :branch) commit))))
          (local-projects (local-projects-dir agent))
-         (in-place (merge-pathnames (format nil "~A/" project) local-projects)))
-    (format t "~&Testing ~A from ~A, branch ~A at ~A, as the lib-world ~S~%"
-            project (getf overlay :url) (getf overlay :branch) commit lib-world)
+         (moves (loop for member in members
+                   collect (cons (string-right-trim "/" (namestring (overlay-clone-dir agent member)))
+                                 (string-right-trim "/" (namestring (merge-pathnames (format nil "~A/" (getf member :project))
+                                                                                       local-projects)))))))
+    (format t "~&Testing ~{~A~^ and ~} as the lib-world ~S~%"
+            (loop for member in members for commit in commits
+               collect (format nil "~A from ~A, branch ~A at ~A"
+                               (getf member :project) (getf member :url) (getf member :branch) commit))
+            lib-world)
     (finish-output)
     (ensure-directories-exist local-projects)
-    (run "mv" (string-right-trim "/" (namestring clone)) (string-right-trim "/" (namestring in-place)))
+    (dolist (move moves)
+      (run "mv" (car move) (cdr move)))
     ;; Quicklisp rebuilds local-projects/system-index.txt in whichever
     ;; lisp next looks, through DIRECTORY-ENTRIES, which its client
     ;; implements for a fixed list of lisps (not EGCL): so the preferred
     ;; lisp rebuilds it now, while the directory is newer than the index.
     (refresh-local-projects agent)
     (unwind-protect
-         (test-grid-agent:test-patched-quicklisp agent (quicklisp-dir agent) lib-world
-                                                 :project-names (list project)
-                                                 ;; the branch's own systems, not the
-                                                 ;; dist's list for the release (a
-                                                 ;; system the branch retired would be
-                                                 ;; answered by the dist's copy)
-                                                 :project-systems (list (cons project (branch-systems in-place))))
-      (run "mv" (string-right-trim "/" (namestring in-place)) (string-right-trim "/" (namestring clone)))
+         (test-grid-agent:test-patched-quicklisp
+          agent (quicklisp-dir agent) lib-world
+          :project-names (mapcar (lambda (member) (getf member :project)) members)
+          ;; the branches' own systems, not the dist's list for a
+          ;; release (a system a branch retired would be answered by
+          ;; the dist's copy; a project the dist lacks has no list)
+          :project-systems (loop for member in members for move in moves
+                               collect (cons (getf member :project) (branch-systems (cdr move)))))
+      (dolist (move moves)
+        (run "mv" (cdr move) (car move)))
       (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
 
 ;;; Polyfills: the dist built from the lisp's manifest, installed over
@@ -506,22 +531,23 @@ be): the lisp under test may not be able to download for itself.
 The overlays are cloned here too, so their branches' dependencies
 are among what is fetched."
   (ensure-quicklisp agent)
-  (dolist (overlay *overlays*)
-    (fetch-overlay agent overlay))
-  (let* ((feature (getf (tg-polyfill:read-manifest manifest-file) :feature))
-         (names (when *projects*
-                  (remove-duplicates
-                   (append *projects*
-                           (mapcar (lambda (overlay) (getf overlay :project)) *overlays*)
-                           (loop for overlay in *overlays* append (overlay-dependencies agent overlay feature)))
-                   :test #'string=))))
-    (format t "~&Prefetching ~:[the whole dist~;~:*~{~A~^, ~} and their dependencies~] ...~%" names)
-    (finish-output)
-    (format t "~&Prefetched: ~A releases installed.~%"
-            (run-in-preferred-lisp agent 7200
-                                   ;; and a fresh local-projects index (see TEST-OVERLAY)
-                                   '(ql:register-local-projects)
-                                   `(cl-user::prefetch-releases ',names)))))
+  (let ((members (loop for overlay in *overlays* append (overlay-members overlay))))
+    (dolist (member members)
+      (fetch-overlay agent member))
+    (let* ((feature (getf (tg-polyfill:read-manifest manifest-file) :feature))
+           (names (when *projects*
+                    (remove-duplicates
+                     (append *projects*
+                             (mapcar (lambda (member) (getf member :project)) members)
+                             (loop for member in members append (overlay-dependencies agent member feature)))
+                     :test #'string=))))
+      (format t "~&Prefetching ~:[the whole dist~;~:*~{~A~^, ~} and their dependencies~] ...~%" names)
+      (finish-output)
+      (format t "~&Prefetched: ~A releases installed.~%"
+              (run-in-preferred-lisp agent 7200
+                                     ;; and a fresh local-projects index (see TEST-OVERLAY)
+                                     '(ql:register-local-projects)
+                                     `(cl-user::prefetch-releases ',names))))))
 
 (defun test-polyfilled (agent lib-world)
   "The whole dist on the polyfilled Quicklisp, or TEST_GRID_PROJECTS
