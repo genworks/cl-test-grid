@@ -46,6 +46,12 @@ if [ -f agent.env ]; then
         eval "if [ -n \"\${kept_$v:-}\" ]; then $v=\"\$keep_$v\"; fi"
     done
 fi
+# Every setting goes to the container as an environment variable, so a
+# line in agent.env counts with or without `export` (a bare
+# TEST_GRID_DEVEL_IMAGE=... line once ran a whole pass on the bare images).
+for v in $SETTINGS; do
+    eval "if [ -n \"\${$v+set}\" ]; then export $v; fi"
+done
 : "${TEST_GRID_WORK_DIR:=$SRC/work-dir/agent}"
 : "${TEST_GRID_AGENT_IMAGE:=clfoundation/ccl:1.14-trixie}"
 : "${DOCKER_CLI_VERSION:=28.5.1}"
