@@ -12,12 +12,21 @@
 (asdf:initialize-source-registry `(:source-registry :ignore-inherited-configuration))
 
 (defun system-project (name)
-  "The project NAME belongs to: its release's in the dist, or its
-primary system's name for one the dist does not know (local-projects)."
+  "The project NAME belongs to: its release's in the dist; for a system
+the dist does not know, the directory under local-projects/ that holds
+it (an overlay's member is tested from local-projects/<project>/), or
+failing that its primary system's name."
   (let ((system (ignore-errors (ql-dist:find-system name))))
-    (string-downcase (if system
-                         (ql-dist:name (ql-dist:release system))
-                         (asdf:primary-system-name name)))))
+    (string-downcase
+     (or (and system (ql-dist:name (ql-dist:release system)))
+         (let* ((dir (ignore-errors (asdf:system-source-directory name)))
+                (components (and dir (reverse (pathname-directory dir))))
+                (under (member "local-projects" components :test #'string=)))
+           ;; ("local-projects" "gendl" ...) reversed: the member
+           ;; just before local-projects is the project directory
+           (and under (not (eq under components))
+                (nth (1- (position "local-projects" components :test #'string=)) components)))
+         (asdf:primary-system-name name)))))
 
 (defun loaded-projects (systems-before system-name)
   "The projects of the systems ASDF has loaded since SYSTEMS-BEFORE,
