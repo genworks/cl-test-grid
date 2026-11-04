@@ -320,23 +320,27 @@ Every subaddress represents some level of pivot groupping."
   (with-output-to-string (s)
     (pivot-table-html3 s objects :rows rows :cols cols :cell-printer cell-printer)))
 
-(defun pivot-report (out pivot-table reports-root-dir-relative-path)
+(defun pivot-report (out pivot-table reports-root-dir-relative-path &optional note)
   (let ((html-template:*string-modifier* #'cl:identity))
     (html-template:fill-and-print-template (src-file "pivot-report-template.html")
                                            (list :the-table pivot-table
+                                                 :note (or note "")
                                                  :time (test-grid-agent::pretty-fmt-time (get-universal-time))
                                                  :reports-root-dir-relative-path reports-root-dir-relative-path)
                                            :stream out)))
 
 (defun print-pivot (file-name
                     objects
-                    &key rows cols cell-printer)
+                    &key rows cols cell-printer note)
+  "NOTE is HTML printed above the table: what the table compares, and
+what an empty table means."
   (with-report-file (out file-name)
     (pivot-report out (pivot-table-html4 objects
                                          :rows rows
                                          :cols cols
                                          :cell-printer cell-printer)
-                  (reports-root-dir-relative-path file-name))))
+                  (reports-root-dir-relative-path file-name)
+                  note)))
 
 (defun print-old-pivots (db quicklisps)
   (let* ((results (list-lib-results db

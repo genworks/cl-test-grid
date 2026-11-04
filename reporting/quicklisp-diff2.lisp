@@ -7,6 +7,8 @@
 (defun quicklisp-diff-items (all-results
                              old-quicklisp
                              new-quicklisp)
+  "The results that differ between the two lib-worlds, among the tests
+performed on both.  Second value: how many tests were compared."
   (let* ((new-ql-results (my-time ("last-ql-results...")
                            (subset all-results
                                    (lambda (result)
@@ -37,27 +39,51 @@
                                                          (result-spec-test result)
                                                          (contact-email result))))
                                           (and (gethash key new-ql-tests)
-                                               (gethash key old-ql-tests))))))
+                                               (gethash key old-ql-tests)))))
+         (compared (loop for key being the hash-keys of new-ql-tests
+                         count (gethash key old-ql-tests))))
     ;; now compute the diff between the results of two quicklisps,
     ;; considering only results from lisps tested on both versions.
-    (my-time ("fast-exclusive-or...")
-      (fast-exclusive-or (subset new-ql-results tested-on-both-lib-worlds-p)
-                         (subset old-ql-results tested-on-both-lib-worlds-p)
-                         :test #'equal
-                         :key (lambda (result)
-                                (list (libname result)
-                                      (lisp result)
-                                      (result-spec result)))))))
+    (values (my-time ("fast-exclusive-or...")
+              (fast-exclusive-or (subset new-ql-results tested-on-both-lib-worlds-p)
+                                 (subset old-ql-results tested-on-both-lib-worlds-p)
+                                 :test #'equal
+                                 :key (lambda (result)
+                                        (list (libname result)
+                                              (lisp result)
+                                              (result-spec result)))))
+            compared)))
+
+(defun diff-note (old-lib-world new-lib-world diff compared)
+  "The heading and the paragraph above a diff table: what was compared,
+and why the table may be empty."
+  (flet ((note (fmt &rest args)
+           (format nil "<h2>~A<br/>vs ~A</h2>~%<p class=\"diff-note\">~?</p>~%"
+                   old-lib-world new-lib-world fmt args)))
+    (cond ((null old-lib-world)
+           (format nil "<h2>~A</h2>~%<p class=\"diff-note\">The only Quicklisp version in the database so far, so there is no earlier one to compare it with yet.</p>~%"
+                   new-lib-world))
+          ((zerop compared)
+           (note "No results in common yet: nothing has been tested on both, on the same implementation, library and machine, so there is nothing to compare.  The table fills in once a run on the first lib-world covers what the second one tested."))
+          ((null diff)
+           (note "~D tests compared, no differences." compared))
+          (t
+           (note "~D tests compared; ~D differ, below." compared
+                 (length (remove-duplicates diff :test #'equal
+                                            :key (lambda (r) (list (lisp r) (libname r) (result-spec-test r))))))))))
 
 (defun print-quicklisp-diff-report2 (report-file
                                      all-results
                                      old-quicklisp
                                      new-quicklisp)
-  (print-pivot report-file
-               (quicklisp-diff-items all-results old-quicklisp new-quicklisp)
-               :rows '((libname string<) (lisp string<))
-               :cols `((lib-world ,(tg-utils::ordering-comparator (list old-quicklisp new-quicklisp) #'string=)))
-               :cell-printer #'results-cell-printer))
+  (multiple-value-bind (diff compared)
+      (quicklisp-diff-items all-results old-quicklisp new-quicklisp)
+    (print-pivot report-file
+                 diff
+                 :rows '((libname string<) (lisp string<))
+                 :cols `((lib-world ,(tg-utils::ordering-comparator (list old-quicklisp new-quicklisp) #'string=)))
+                 :cell-printer #'results-cell-printer
+                 :note (diff-note old-quicklisp new-quicklisp diff compared))))
 
 (defun tests-failed-on-new (all-results old-lib-world new-lib-world)
   "Results from the two lib worlds, which have failures on the NEW-LIB-WORLD"

@@ -102,20 +102,152 @@
           (read in nil nil))))))
 
 ;;; An index page pointing at them
+;;; Overlay lib-worlds on the index.  "<base> + <segment>": the segment
+;;; is either "polyfill-<lisp> <version>" (a polyfilled dist) or the
+;;; members of a branch set, "gendl@devo 594f2082+batten@devo 06d7ccd6".
+;;; On the index a branch is one line, not a heading per commit: the
+;;; latest commit per base, a diff link each, and the project's library
+;;; page, where the branch worlds are columns beside the dist's.
+
+(defun split-on (char string)
+  (loop with start = 0
+        for pos = (position char string :start start)
+        collect (subseq string start pos)
+        while pos
+        do (setf start (1+ pos))))
+
+(defun last-segment (lib-world)
+  (let ((pos (search " + " lib-world :from-end t)))
+    (and pos (subseq lib-world (+ pos 3)))))
+
+(defun polyfill-world-p (lib-world)
+  (let ((segment (last-segment lib-world)))
+    (and segment
+         (>= (length segment) 9)
+         (string= "polyfill-" segment :end2 9))))
+
+(defun branch-world-p (lib-world)
+  (and (test-grid-reporting::overlay-lib-world-p lib-world)
+       (not (polyfill-world-p lib-world))))
+
+(defun branch-members (lib-world)
+  "((project branch commit) ...) of a branch world's last segment."
+  (loop for member in (split-on #\+ (last-segment lib-world))
+        collect (let ((at (position #\@ member))
+                      (space (position #\Space member)))
+                  (list (subseq member 0 at)
+                        (subseq member (1+ at) space)
+                        (subseq member (1+ space))))))
+
+(defun branch-key (lib-world)
+  "The set without its commits: gendl@devo+batten@devo."
+  (format nil "~{~A~^+~}"
+          (mapcar (lambda (m) (format nil "~A@~A" (first m) (second m)))
+                  (branch-members lib-world))))
+
+(defun branch-commits (lib-world)
+  (format nil "~{~A~^+~}" (mapcar #'third (branch-members lib-world))))
+
+(defun polyfill-world-lisp (lib-world)
+  "egcl for \"... + polyfill-egcl 2026-11-03.c16adc\"."
+  (let ((segment (last-segment lib-world)))
+    (subseq segment 9 (position #\Space segment))))
+
+(defun diff-link (lib-world)
+  (format nil "overlays/~A-diff.html" (test-grid-reporting::file-safe-name lib-world)))
+
+(defun latest-lib-world (lib-worlds latest-time)
+  "The lib-world among LIB-WORLDS with the newest run."
+  (first (sort (copy-list lib-worlds) #'>
+               :key (lambda (lw) (gethash lw latest-time 0)))))
+
+(defun branches-html (lib-worlds latest-time)
+  "The Branches under test section, or nil when there are none."
+  (let ((groups (make-hash-table :test 'equal))   ; key -> (base -> worlds)
+        (keys '()))
+    (dolist (lw lib-worlds)
+      (when (branch-world-p lw)
+        (let ((key (branch-key lw))
+              (base (test-grid-reporting::overlay-base lw)))
+          (unless (gethash key groups)
+            (setf (gethash key groups) (make-hash-table :test 'equal))
+            (push key keys))
+          (push lw (gethash base (gethash key groups))))))
+    (when keys
+      (with-output-to-string (out)
+        (format out "<h2>Branches under test</h2>
+<p>A branch of a project's repository tested in place of the dist's
+release of it, on every implementation.  Its results are columns on the
+project's library page beside the dist's; each line below is the latest
+commit tested on each lib-world, with the diff against that lib-world.
+A new commit on the branch is tested afresh and replaces the previous one here.</p>
+<ul>~%")
+        (dolist (key (sort keys #'string<))
+          (let* ((by-base (gethash key groups))
+                 (bases (sort (loop for base being the hash-keys of by-base collect base)
+                              #'string<))
+                 (projects (mapcar #'first (branch-members (first (gethash (first bases) by-base))))))
+            (format out "  <li><b>~A</b>" key)
+            (format out "~{ &mdash; <a href=\"library/~(~A~).html\">~:*~A</a>~}"
+                    (remove-if-not (lambda (p)
+                                     (probe-file (merge-pathnames (format nil "library/~(~A~).html" p)
+                                                                  *reports-dir*)))
+                                   projects))
+            (format out "~%    <ul>~%")
+            (dolist (base bases)
+              (let* ((worlds (gethash base by-base))
+                     (latest (latest-lib-world worlds latest-time))
+                     (earlier (1- (length worlds))))
+                (format out "      <li>on ~A: ~A (<a href=\"~A\">diff</a>~[~;, 1 earlier commit~:;, ~:*~D earlier commits~])</li>~%"
+                        base (branch-commits latest) (diff-link latest) earlier)))
+            (format out "    </ul></li>~%")))
+        (format out "</ul>~%")))))
+
+(defun polyfills-html (lib-worlds latest-time)
+  "The Polyfills section, or nil when no manifest was reported on."
+  (let ((summaries (polyfill-summaries)))
+    (when summaries
+      (with-output-to-string (out)
+        (format out "<h2>Polyfills</h2>
+<p>The projects an implementation still needs a patched source for: each
+is tested on the stock dist and on the dist with the polyfill installed,
+and an entry is retirable once the stock release passes.  The number to
+watch is the entries still needed.  The diff is the polyfilled dist
+against the stock one, on that implementation.</p>
+<ul>~%")
+        (dolist (summary summaries)
+          (let* ((lisp (getf summary :lisp))
+                 (worlds (remove-if-not (lambda (lw)
+                                          (and (polyfill-world-p lw)
+                                               (string= (polyfill-world-lisp lw) lisp)))
+                                        lib-worlds))
+                 (latest (and worlds (latest-lib-world worlds latest-time))))
+            (format out "  <li><a href=\"~A\">~A</a>: ~D entries, ~D still needed, ~D retirable, ~D untested, ~D without a public source~@[ (<a href=\"~A\">diff</a>)~]</li>~%"
+                    (getf summary :file) lisp
+                    (getf summary :entries) (getf summary :needed) (getf summary :retirable)
+                    (getf summary :untested) (getf summary :candidates)
+                    (and latest (diff-link latest)))))
+        (format out "</ul>~%")))))
+
 (defun write-index ()
   (let* ((db (tg-storage:data *replica*))
          (runs (getf db :runs))
+         (latest-time (make-hash-table :test 'equal))
          (all-lib-worlds (remove-duplicates
                           (mapcar (lambda (run) (getf (getf run :descr) :lib-world)) runs)
                           :test #'string=))
          (lib-worlds (sort (remove-if #'test-grid-reporting::overlay-lib-world-p all-lib-worlds)
                            #'string>))
-         (overlays (sort (remove-if-not #'test-grid-reporting::overlay-lib-world-p all-lib-worlds)
-                         #'string<))
          (lisps (sort (remove-duplicates
                        (mapcar (lambda (run) (getf (getf run :descr) :lisp)) runs)
                        :test #'string=)
                       #'string<)))
+    (dolist (run runs)
+      (let* ((descr (getf run :descr))
+             (lib-world (getf descr :lib-world)))
+        (setf (gethash lib-world latest-time)
+              (max (gethash lib-world latest-time 0)
+                   (or (getf descr :time) 0)))))
     (with-open-file (out (merge-pathnames "index.html" *reports-dir*)
                          :direction :output :if-exists :supersede
                          :external-format tg-utils:*utf-8-external-format*)
@@ -141,21 +273,7 @@ The project: <a href=\"https://github.com/cl-test-grid/cl-test-grid\">cl-test-gr
   <li><a href=\"testsuites-pivots.html\">Pivot tables</a> of the test suite results</li>
   <li><a href=\"export.csv\">CSV export</a> of the test suite results</li>
 </ul>
-~:[~;<h2>Branches under test</h2>
-<p>A branch of a project's repository tested in place of the dist's
-release of it; each page is the diff against the lib-world under it.</p>
-<ul>~:*~{
-  <li><a href=\"overlays/~A-diff.html\">~A</a></li>~}
-</ul>
-~]~:[~;<h2>Polyfills</h2>
-<p>The projects an implementation still needs a patched source for: each
-is tested on the stock dist and on the dist with the polyfill installed,
-and an entry is retirable once the stock release passes.  The number to
-watch is the entries still needed.</p>
-<ul>~:*~{
-  <li><a href=\"~A\">~A</a>: ~D entries, ~D still needed, ~D retirable, ~D untested, ~D without a public source</li>~}
-</ul>
-~]<h2>In the database</h2>
+~@[~A~]~@[~A~]<h2>In the database</h2>
 <p>~A test runs, Quicklisp versions:~{ ~A~^,~}.</p>
 <p>Implementations:</p>
 <ul>~{
@@ -165,17 +283,8 @@ watch is the entries still needed.</p>
 </body>
 </html>
 "
-              (loop for overlay in overlays
-                 collect (test-grid-reporting::file-safe-name overlay)
-                 collect overlay)
-              (loop for summary in (polyfill-summaries)
-                 collect (getf summary :file)
-                 collect (getf summary :lisp)
-                 collect (getf summary :entries)
-                 collect (getf summary :needed)
-                 collect (getf summary :retirable)
-                 collect (getf summary :untested)
-                 collect (getf summary :candidates))
+              (branches-html all-lib-worlds latest-time)
+              (polyfills-html all-lib-worlds latest-time)
               (length runs) lib-worlds lisps
               (multiple-value-bind (s m h day month year) (decode-universal-time (get-universal-time) 0)
                 (format nil "~4,'0D-~2,'0D-~2,'0D ~2,'0D:~2,'0D:~2,'0D UTC" year month day h m s))))))

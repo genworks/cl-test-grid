@@ -28,10 +28,11 @@
     </script>
 </head>
 <body>
+    <!-- TMPL_VAR note -->
     <!-- jquery.thead for some reason wants the table to have a parent element with some CSS class -->
     <div class="dummy-class-for-jquery-thead"> 
     <!-- TMPL_VAR the-table -->
     </div>
-    <p><a href="https://github.com/cl-test-grid/cl-test-grid/tree/master/reporting/#readme" class="to-overview">To reports overview</a></p>
+    <p><a href="<!-- TMPL_VAR reports-root-dir-relative-path -->index.html" class="to-overview">To reports overview</a></p>
     <p class="timestamp">Generated at: <!-- TMPL_VAR time --> GMT.</p>
 </body></html>
