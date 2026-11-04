@@ -114,8 +114,12 @@ cloned into the private Quicklisp's `local-projects/` for that pass
 only. The results sit beside the dist's in the storage, so the reports
 compare them (a Quicklisp-diff of the two lib-worlds is the branch
 against the release), and a new commit on the branch is a new
-lib-world, tested afresh. The project's systems are those the dist
-lists for it.
+lib-world, tested afresh. The systems tested are those the branch's
+own .asd files define, so a system the branch retired is not asked
+for and a new one is. Members joined by `+` form a set tested together
+in one lib-world, for a branch that needs a project the dist lacks:
+`gendl=...#devo+batten=https://github.com/genworks/batten.git#devo` is
+`quicklisp 2026-01-01 + gendl@devo de9fb09b+batten@devo 06d7ccd6`.
 
 A lisp the stock dist does not serve well yet can carry a polyfill: a
 manifest, `polyfills/<lisp>.sexp`, listing the projects that need a
