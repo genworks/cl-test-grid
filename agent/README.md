@@ -179,7 +179,9 @@ Volunteering a machine
 Any Linux machine with docker and a few spare cores can join the grid
 and shorten the pass over a dist: clone this repository, put your email,
 your upload token (ask on the mailing list) and the lisps you want to
-run in _agent.env_, and run _run-agent-docker.sh_ from cron.  The
+run in _agent.env_, `mkdir -p work-dir` once, and run
+_run-agent-docker.sh_ from cron with its output appended to a file in
+_work-dir/_.  The
 coordination above means your agent takes only pairs nobody has done,
 and the reports credit the results to your email.  The branches under
 test (`TEST_GRID_OVERLAYS`) and the polyfills are configuration too:
