@@ -44,8 +44,12 @@
 ;;; dependency closure, or the whole dist when the pass is the whole
 ;;; dist.  Plumbing, not the thing under test.
 
-(defun release-closure (release-names)
-  "The releases of RELEASE-NAMES and of every system they depend on, transitively."
+(defun release-closure (release-names &key (follow-siblings t))
+  "The releases of RELEASE-NAMES and of every system they depend on,
+transitively.  With FOLLOW-SIBLINGS, a release reached through one of
+its systems brings its other systems' dependencies too (a prefetch
+wants everything a pass might load); without, only what the named
+releases' own systems need (a test list: what a project's users meet)."
   (let ((seen (make-hash-table :test 'equal))
         (releases (make-hash-table :test 'equal))
         ;; release name -> every system of it, secondary systems
@@ -66,8 +70,9 @@
                      ;; the release's other systems too: a system loads
                      ;; its siblings at load time (frugal-uuid wants
                      ;; frugal-uuid/non-frugal, which wants trivial-clock)
-                     (dolist (sibling (gethash (fncall "ql-dist:name" release) siblings))
-                       (visit-system sibling))))
+                     (when follow-siblings
+                       (dolist (sibling (gethash (fncall "ql-dist:name" release) siblings))
+                         (visit-system sibling)))))
                  (dolist (name (fncall "ql-dist:required-systems" system))
                    (visit-system (fncall "ql-dist:find-system" name))))))
       (dolist (name release-names)
@@ -75,11 +80,20 @@
         (let ((release (fncall "ql-dist:find-release" name))
               (system (fncall "ql-dist:find-system" name)))
           (cond (release
-                 (dolist (system (fncall "ql-dist:provided-systems" release))
+                 ;; every system of a named release, secondary ones too
+                 (dolist (system (or (gethash name siblings)
+                                     (fncall "ql-dist:provided-systems" release)))
                    (visit-system system)))
                 (system (visit-system system))
                 (t (format t "~&prefetch: no release or system named ~A~%" name))))))
     (loop for release being the hash-values of releases collect release)))
+
+(defun closure-release-names (names)
+  "The names of the releases NAMES and everything their systems need,
+transitively, sorted: TEST_GRID_PROJECTS=closure:<project>."
+  (sort (mapcar (lambda (release) (fncall "ql-dist:name" release))
+                (release-closure names :follow-siblings nil))
+        #'string<))
 
 (defun fetchable-p (release)
   "Whether this lisp's client can fetch RELEASE: http, or a polyfill

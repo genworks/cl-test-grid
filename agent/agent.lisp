@@ -254,11 +254,35 @@ the PREDICATE."
 for a pass over a chosen few projects of a custom lib-world whose full
 pass must still happen (a polyfilled dist tried out).")
 
+(defvar *tested-elsewhere-p* nil
+  "A function of (agent lib-world lisp-identifier), or NIL: true when
+the pair is done or under way on another agent -- a run of it in the
+storage, or a live claim there -- so this agent leaves it alone, as it
+leaves a pair it has tested itself.  Consulted only for a run that
+would count (COUNTED-RUN-P).")
+
+(defvar *claim-run* nil
+  "A function of (agent lib-world lisp-identifier), or NIL, called just
+before a counted run starts: it records the claim in the storage and
+returns true, or NIL when an earlier live claim of the pair by another
+agent stands, in which case the run is skipped.")
+
+(defun counted-run-p (agent)
+  "Whether a run marks the lisp tested on the lib-world: not a pass
+over a chosen few projects of a lib-world whose full pass is still
+owed (an overlay names its projects and is complete with them), and
+not one under *MARK-TESTED* NIL."
+  (and *mark-tested*
+       (or (null (custom-project-names agent))
+           (custom-lib-world agent))))
+
 (defun run-tests (agent lib-world)
   (divide-into (lisp-exes agent) (lambda (lisp)
-                                   (tested-p (persistence agent)
-                                             lib-world
-                                             (implementation-identifier lisp)))
+                                   (let ((id (implementation-identifier lisp)))
+                                     (or (tested-p (persistence agent) lib-world id)
+                                         (and *tested-elsewhere-p*
+                                              (counted-run-p agent)
+                                              (funcall *tested-elsewhere-p* agent lib-world id)))))
       (done-lisps pending-lisps)
     (when done-lisps
       (log:info "Skipping the lisps already tested on ~A: ~S"
@@ -281,7 +305,11 @@ pass must still happen (a polyfilled dist tried out).")
                            :lib-world lib-world
                            :time (get-universal-time)
                            :run-duration :unknown
-                           :contact-email (user-email agent)))))
+                           :contact-email (user-email agent)
+                           ;; whether this run covers the lib-world
+                           ;; (what another agent may rely on) or a
+                           ;; chosen few of its projects
+                           :coverage (if (counted-run-p agent) :full :partial)))))
         (dolist (lisp pending-lisps)
           (handler-bind
               ((serious-condition (lambda (c)
@@ -290,23 +318,27 @@ pass must still happen (a polyfilled dist tried out).")
                                       (log:error "Error of type ~A during tests on ~A: ~A~%~A~%Continuing for the remaining lisps."
                                                  (type-of c) (implementation-identifier lisp) c bt))
                                     (go continue))))
-            (log:info "Running tests for ~A" (implementation-identifier lisp))
-            (let ((results-dir (complete-test-run (or (find-unfinished-run lib-world (implementation-identifier lisp))
-                                                      (make-run lib-world (implementation-identifier lisp)))
-                                                  agent
-                                                  lisp
-                                                  (projects-to-test agent))))
-              (submit-test-run-results results-dir (result-storages-for-lisp agent lisp))
-              ;; A run over a chosen few projects of the dist (trying
-              ;; the setup out) is not the lisp tested on this
-              ;; lib-world: the full run must still happen.  A custom
-              ;; lib-world is complete with its project list, though
-              ;; (an overlay names the projects it replaces).
-              (unless (or (not *mark-tested*)
-                          (and (custom-project-names agent)
-                               (not (custom-lib-world agent))))
-                (mark-tested (persistence agent) lib-world (implementation-identifier lisp)))
-              (cl-fad:delete-directory-and-files results-dir :if-does-not-exist :ignore)))
+            (if (and *claim-run*
+                     (counted-run-p agent)
+                     (not (funcall *claim-run* agent lib-world (implementation-identifier lisp))))
+                (log:info "Skipping ~A on ~A: another agent claimed it first."
+                          (implementation-identifier lisp) lib-world)
+                (progn
+                  (log:info "Running tests for ~A" (implementation-identifier lisp))
+                  (let ((results-dir (complete-test-run (or (find-unfinished-run lib-world (implementation-identifier lisp))
+                                                            (make-run lib-world (implementation-identifier lisp)))
+                                                        agent
+                                                        lisp
+                                                        (projects-to-test agent))))
+                    (submit-test-run-results results-dir (result-storages-for-lisp agent lisp))
+                    ;; A run over a chosen few projects of the dist (trying
+                    ;; the setup out) is not the lisp tested on this
+                    ;; lib-world: the full run must still happen.  A custom
+                    ;; lib-world is complete with its project list, though
+                    ;; (an overlay names the projects it replaces).
+                    (when (counted-run-p agent)
+                      (mark-tested (persistence agent) lib-world (implementation-identifier lisp)))
+                    (cl-fad:delete-directory-and-files results-dir :if-does-not-exist :ignore)))))
           continue)))))
 
 (defun ensure-has-id (agent)

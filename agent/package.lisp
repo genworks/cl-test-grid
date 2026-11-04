@@ -26,6 +26,8 @@
            ;; the same run against another Quicklisp directory, as a
            ;; lib-world of its own
            #:test-patched-quicklisp #:*mark-tested*
+           ;; coordination between agents through the storage
+           #:*tested-elsewhere-p* #:*claim-run*
 
            ;; DEPRECATED
            #:+api-version+

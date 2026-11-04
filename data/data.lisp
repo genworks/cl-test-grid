@@ -14,6 +14,7 @@
    #:add-test-run
    #:add-test-runs
    #:remove-test-runs
+   #:claim-test-run
    #:remove-lib-results
    #:update-run-descr))
 
@@ -63,14 +64,15 @@ near the cl-test-grid repo."
   ;; This is convenient because allows to execute
   ;; add-test-run transactions on test-grid-storage
   ;; without checking, whether DB has already been initialized.
-  (make-db (cons test-run (getf db :runs))))
+  ;; Whatever else the DB holds (the claims) is kept.
+  (updated-plist (or db (make-db)) :runs (cons test-run (getf db :runs))))
 
 (defun add-test-runs (db test-runs)
   ;; If DB is NIL, creates new DB automatically.
   ;; This is convenient because allows to execute
   ;; add-test-run transactions on test-grid-storage
   ;; without checking, whether DB has already been initialized.
-  (make-db (append test-runs (getf db :runs))))
+  (updated-plist (or db (make-db)) :runs (append test-runs (getf db :runs))))
 
 (defun test-run-matcher (descr-key-val-plist)
   (let ((key-val-alist (alexandria:plist-alist descr-key-val-plist)))
@@ -84,6 +86,18 @@ near the cl-test-grid repo."
 (defun remove-test-runs (db &rest descr-key-val-plist)
   (updated-plist db :runs (remove-if (test-run-matcher descr-key-val-plist)
                                      (getf db :runs))))
+
+(defun claim-test-run (db claim)
+  "CLAIM, a plist (:lisp :lib-world :agent-id :time), says an agent is
+about to test that lisp on that lib-world, so that other agents leave
+the pair to it (agent.lisp, *TESTED-ELSEWHERE-P* and *CLAIM-RUN*).
+The earliest live claim of a pair wins; a claim is moot once a run of
+its pair is in the DB, and one older than a week is dropped here."
+  (let ((cutoff (- (getf claim :time) (* 7 24 60 60))))
+    (updated-plist (or db (make-db)) :claims
+                   (cons claim
+                         (remove-if (lambda (c) (< (getf c :time) cutoff))
+                                    (getf db :claims))))))
 
 (defun update-run-descr (db descr-key-val-plist new-key-vals)
   "DESCR-KEY-VAL-PLIST specifies what test run(s) to update.
@@ -155,13 +169,14 @@ NEW-KEY-VALS are new key-values for descriptions of that test runs."
 
 (defun print-test-run (out test-run &optional (indent 0))
   (let ((descr (getf test-run :descr)))
-    (format out
-            "(:descr (:lisp ~s :lib-world ~s :time ~s :run-duration ~s :contact-email ~s)~%"
+(format out
+            "(:descr (:lisp ~s :lib-world ~s :time ~s :run-duration ~s :contact-email ~s~@[ :coverage ~s~])~%"
             (getf descr :lisp)
             (getf descr :lib-world)
             (getf descr :time)
             (getf descr :run-duration)
-            (getf descr :contact-email)))
+            (getf descr :contact-email)
+            (getf descr :coverage)))
   (format out "~v,0t:results (" (1+ indent))
   (print-list-elements out
                        (sort (copy-list (getf test-run :results))
@@ -218,7 +233,10 @@ NEW-KEY-VALS are new key-values for descriptions of that test runs."
                        (format nil "~%~v,0t" (+ indent 8))
                        #'(lambda (test-run)
                            (print-test-run out test-run (+ indent 8))))
-  (format out "))"))
+  (format out ")")
+  (when (getf db :claims)
+    (format out "~%~v,0t :claims ~S" indent (getf db :claims)))
+  (format out ")"))
 
 (defun save-db (db stream-or-path)
   (with-open-file (out stream-or-path

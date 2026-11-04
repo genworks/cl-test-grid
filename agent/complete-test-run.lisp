@@ -137,13 +137,15 @@ data (libraries test suites output and the run results) will be saved."
   (merge-pathnames "logs/" run-directory))
 
 (defun lib-log-name (lib-name)
-  (substitute #\- #\.
-              ;; Substitute dots by hypens because CCL
-              ;; prepends the > symbol before dots (at least on windows);
-              ;; for example: hu.dwim.stefil => hu>.dwim.stefil.
-              ;; When we pass such a pathname to another lisps,
-              ;; they can't handle it.
-              (string-downcase lib-name)))
+  (substitute #\- #\/
+              ;; a slash (alexandria/tests) would make a directory of the log
+              (substitute #\- #\.
+                          ;; Substitute dots by hypens because CCL
+                          ;; prepends the > symbol before dots (at least on windows);
+                          ;; for example: hu.dwim.stefil => hu>.dwim.stefil.
+                          ;; When we pass such a pathname to another lisps,
+                          ;; they can't handle it.
+                          (string-downcase lib-name))))
 
 (defun lib-log-file (test-run-directory lib-name)
   (merge-pathnames (lib-log-name lib-name)
@@ -345,13 +347,15 @@ upon the BODY completion runs the BODY again."
 (defun loadtest-log-name (system-name)
   (format nil
           "~A-load"
-          (substitute #\- #\.
-                      ;; Substitute dots by hypens because CCL
-                      ;; prepends the > symbol before dots (at least on windows);
-                      ;; for example: hu.dwim.stefil => hu>.dwim.stefil.
-                      ;; When we pass such a pathname to another lisps,
-                      ;; they can't handle it.
-                      (string-downcase system-name))))
+          (substitute #\- #\/
+                      ;; a slash (alexandria/tests) would make a directory of the log
+                      (substitute #\- #\.
+                                  ;; Substitute dots by hypens because CCL
+                                  ;; prepends the > symbol before dots (at least on windows);
+                                  ;; for example: hu.dwim.stefil => hu>.dwim.stefil.
+                                  ;; When we pass such a pathname to another lisps,
+                                  ;; they can't handle it.
+                                  (string-downcase system-name)))))
 
 (defun loadtest-log-file (test-run-directory system-name)
   (merge-pathnames (loadtest-log-name system-name)

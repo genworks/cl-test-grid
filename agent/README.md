@@ -152,6 +152,40 @@ directory, since a home that once took the vendor dist keeps it; the
 lib-world carries both versions, `quicklisp 2026-01-01 + polyfill-dotcl
 2026-10-27+2026-11-03.eec61f`.
 
+A pass over a whole dist runs every system in a fresh process, some
+6,000 of them for a Quicklisp dist, so it takes a day or so per lisp.
+Three things keep that in hand.  `TEST_GRID_PARALLEL=N` makes
+_run-agent-docker.sh_ run the lisps of `TEST_GRID_LISPS` as N agents at
+a time, one container and one work directory (so one private Quicklisp
+and one record of what was tested) per lisp, under
+`<work dir>/parallel/<lisp>/`, each writing _run.log_ there.  A
+`closure:<project>` entry in `TEST_GRID_PROJECTS` stands for that project
+and every release it needs, transitively, as the dist's index has it:
+`closure:gendl` is the slice of the dist Gendl's users meet, hours
+rather than a day, and a natural first pass for a lisp or a polyfill
+before the whole dist.  And agents coordinate through the server: before
+a run that would count as the lisp tested on the lib-world, the agent
+syncs a replica of the results and leaves the pair alone when a full run
+of it is there already, or another agent's claim of it not two days old;
+otherwise it records a claim of its own and goes ahead.  So several
+machines, ours and volunteers', share the catalog without doing the same
+lisp on the same dist twice, and a machine that joins late finds only
+what is left.  `TEST_GRID_COORDINATE=no` switches that off, which a
+host must say to redo a pair it already has in the storage.
+
+Volunteering a machine
+----------------------
+
+Any Linux machine with docker and a few spare cores can join the grid
+and shorten the pass over a dist: clone this repository, put your email,
+your upload token (ask on the mailing list) and the lisps you want to
+run in _agent.env_, and run _run-agent-docker.sh_ from cron.  The
+coordination above means your agent takes only pairs nobody has done,
+and the reports credit the results to your email.  The branches under
+test (`TEST_GRID_OVERLAYS`) and the polyfills are configuration too:
+a volunteer who sets neither tests the dist as published, and nothing
+else.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are

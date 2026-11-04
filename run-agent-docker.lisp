@@ -15,7 +15,18 @@
 ;;;;   TEST_GRID_LISPS          comma-separated names from *CATALOG*; the
 ;;;;                            default is every lisp built for this machine
 ;;;;   TEST_GRID_PROJECTS       comma-separated Quicklisp projects, to test
-;;;;                            only those (for trying the setup out)
+;;;;                            only those (for trying the setup out).  An
+;;;;                            entry closure:<project> stands for the
+;;;;                            project and every release it needs,
+;;;;                            transitively (closure:gendl: the slice of
+;;;;                            the dist Gendl's users meet)
+;;;;   TEST_GRID_COORDINATE     "no" to test a lisp on a lib-world even when
+;;;;                            the storage holds a full run of that pair, or
+;;;;                            another agent's claim of it; the default
+;;;;                            leaves such pairs to the agent that has
+;;;;                            them, and claims this agent's own
+;;;;   TEST_GRID_PARALLEL       read by run-agent-docker.sh: N agents at a
+;;;;                            time, one per lisp of TEST_GRID_LISPS
 ;;;;   TEST_GRID_WORK_DIR       default work-dir/agent/ beside this file; a
 ;;;;                            lisp that needs a Quicklisp of its own
 ;;;;                            (:own-quicklisp in *CATALOG*: dotcl) runs
@@ -92,7 +103,7 @@
 (tg-require-quicklisp:require :agent-work-dir *work-dir*)
 
 (let ((asdf:*central-registry* (cons *this-dir* asdf:*central-registry*)))
-  (ql:quickload :test-grid-agent))
+  (ql:quickload '(:test-grid-agent :test-grid-storage)))
 
 (load (merge-pathnames "build-polyfill-dist.lisp" *this-dir*))
 
@@ -237,7 +248,9 @@
           ;; not --quiet: a full image is over a gigabyte, and the layer
           ;; status lines are the only sign of life while it downloads
           ;; and extracts
-          (uiop:run-program (list "docker" "pull" image)
+          ;; bounded: a pull the registry never answers would
+          ;; otherwise hold the whole run
+          (uiop:run-program (list "timeout" "3600" "docker" "pull" image)
                             :output t :error-output t)))))
 
 ;;; Agents.  The lisps share one agent, one work directory and one
@@ -388,7 +401,11 @@ for the dist."
 feature in particular."
   (sort (remove-duplicates
          (loop for asd in (tg-polyfill:asd-files (uiop:ensure-directory-pathname dir))
-            append (mapcar #'first (tg-polyfill:read-asd-systems asd :cl-test-grid)))
+            append (remove-if (lambda (name) (find #\/ name))
+                              ;; secondary systems (alexandria/tests) are
+                              ;; not tested from the dist either: its index
+                              ;; lists a release's primary systems
+                              (mapcar #'first (tg-polyfill:read-asd-systems asd :cl-test-grid))))
          :test #'string=)
         #'string<))
 
@@ -558,6 +575,126 @@ without marking the lisp tested (the full pass is still owed)."
                                           :project-names *projects*
                                           :mark-tested (null *projects*)))
 
+;;; Project lists.  TEST_GRID_PROJECTS names the projects of a pass;
+;;; an entry closure:<project> stands for that project and every
+;;; release it needs, transitively, as the dist's index has it -- the
+;;; slice of the dist a project's users meet, tested in hours rather
+;;; than the dist's day.  The closure is read in the preferred lisp
+;;; from the first agent's Quicklisp (one dist, one closure) and
+;;; becomes the project list of every agent.
+
+(defun closure-spec-p (name)
+  (uiop:string-prefix-p "closure:" name))
+
+(defun expand-projects (agent)
+  (when (some #'closure-spec-p *projects*)
+    (ensure-quicklisp agent)
+    (let* ((roots (mapcar (lambda (name) (subseq name (length "closure:")))
+                          (remove-if-not #'closure-spec-p *projects*)))
+           (closure (run-in-preferred-lisp agent 1800 `(cl-user::closure-release-names ',roots)))
+           (names (sort (remove-duplicates (append (remove-if #'closure-spec-p *projects*) closure)
+                                           :test #'string=)
+                        #'string<)))
+      (format t "~&The closure of ~{~A~^, ~}: ~D projects.~%Testing the projects ~{~A~^, ~}~%"
+              roots (length closure) names)
+      (finish-output)
+      (setf *projects* names)
+      (dolist (entry *agents*)
+        (setf (test-grid-agent::custom-project-names (getf entry :agent)) names)))))
+
+;;; Coordination between agents, through the storage: several machines
+;;; (ours, and volunteers') share the catalog of lisps without doing
+;;; the same lisp on the same lib-world twice.  Before a counted run
+;;; (agent.lisp, COUNTED-RUN-P) the agent syncs a replica of "main"
+;;; and leaves the pair alone when a full run of it is there already,
+;;; or a live claim by another agent; otherwise it records a claim of
+;;; its own (a claim-test-run transaction) and goes ahead unless an
+;;; earlier claim beat it in.  A claim without its run is stale after
+;;; two days.  The storage unreachable means no coordination for that
+;;; decision, never a stopped agent.  TEST_GRID_COORDINATE=no turns it
+;;; off -- what a host must say to redo a pair it has in the storage
+;;; (removing persistence.lisp is not enough then).
+
+(defparameter *coordinate*
+  (not (string-equal "no" (env "TEST_GRID_COORDINATE" "yes"))))
+
+(defparameter +claim-ttl+ (* 48 60 60)
+  "Seconds after which a claim with no run behind it no longer counts.")
+
+(defvar *store-replica* nil)
+
+(defun store-data ()
+  "The storage's data, synced now; NIL when the storage cannot be reached."
+  (handler-case
+      (progn
+        (unless *store-replica*
+          (setf *store-replica* (tg-storage:get-replica "main" :snapshot-directory *work-dir*)))
+        (tg-storage:sync *store-replica*)
+        (tg-storage:data *store-replica*))
+    (error (e)
+      (format t "~&The storage could not be synced (~A); nothing coordinated this time.~%" e)
+      nil)))
+
+(defun full-run-p (run lib-world lisp)
+  (let ((descr (getf run :descr)))
+    (and (string= (getf descr :lib-world) lib-world)
+         (string= (getf descr :lisp) lisp)
+         (eq (getf descr :coverage) :full))))
+
+(defun live-claims (data lib-world lisp)
+  "The claims of the pair not yet stale, earliest first."
+  (let ((now (get-universal-time)))
+    (sort (remove-if-not (lambda (claim)
+                           (and (string= (getf claim :lib-world) lib-world)
+                                (string= (getf claim :lisp) lisp)
+                                (< (- now (getf claim :time)) +claim-ttl+)))
+                         (getf data :claims))
+          #'< :key (lambda (claim) (getf claim :time)))))
+
+(defun agent-id (agent)
+  (test-grid-agent::get-agent-id (test-grid-agent::persistence agent)))
+
+(defun tested-elsewhere-p (agent lib-world lisp)
+  (let ((data (store-data)))
+    (when data
+      (let ((claim (first (live-claims data lib-world lisp))))
+        (cond ((find-if (lambda (run) (full-run-p run lib-world lisp)) (getf data :runs))
+               (format t "~&~A on ~S is in the storage already; leaving it.~%" lisp lib-world)
+               t)
+              ((and claim (not (equal (getf claim :agent-id) (agent-id agent))))
+               (format t "~&~A on ~S is claimed by agent ~A; leaving it.~%"
+                       lisp lib-world (getf claim :agent-id))
+               t))))))
+
+(defun claim-run (agent lib-world lisp)
+  "Records this agent's claim of the pair; true unless an earlier live
+claim by another agent stands."
+  (if (null (store-data))
+      t
+      (handler-case
+          (progn
+            (sptm:record-transaction (tg-storage::make-transaction-log "main")
+                                     'test-grid-data:claim-test-run
+                                     (list (list :lisp lisp :lib-world lib-world
+                                                 :agent-id (agent-id agent)
+                                                 :time (get-universal-time))))
+            (let ((winner (first (live-claims (store-data) lib-world lisp))))
+              (if (and winner (not (equal (getf winner :agent-id) (agent-id agent))))
+                  (progn
+                    (format t "~&~A on ~S: agent ~A claimed it first; leaving it.~%"
+                            lisp lib-world (getf winner :agent-id))
+                    nil)
+                  (progn
+                    (format t "~&Claimed ~A on ~S.~%" lisp lib-world)
+                    t))))
+        (error (e)
+          (format t "~&The claim could not be recorded (~A); running anyway.~%" e)
+          t))))
+
+(when *coordinate*
+  (setf test-grid-agent:*tested-elsewhere-p* 'tested-elsewhere-p
+        test-grid-agent:*claim-run* 'claim-run))
+
 ;;; The runs: for each agent, the dist, then the overlays; then, for a
 ;;; lisp with a polyfill, the polyfilled dist and the overlays again.
 
@@ -568,6 +705,7 @@ without marking the lisp tested (the full pass is still owed)."
     (format t "~&Agent for ~{~A~^, ~}, work directory ~A~@[, polyfill ~A~]~%"
             (getf entry :names) (test-grid-agent:work-dir agent) manifest-file)
     (finish-output)
+    (expand-projects agent)
     ;; the stock pass: with the lisp told to leave its own dist out,
     ;; for a lisp that has one
     (let ((lisp-exe:*prelude-forms* (getf manifest :stock-forms)))
