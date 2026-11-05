@@ -121,6 +121,17 @@ in one lib-world, for a branch that needs a project the dist lacks:
 `gendl=...#devo+batten=https://github.com/genworks/batten.git#devo` is
 `quicklisp 2026-01-01 + gendl@devo de9fb09b+batten@devo 06d7ccd6`.
 
+A member can also declare the libraries it needs beyond the dist, each
+pinned, with a patch if any: `docker/quicklisp-needs/` in its checkout,
+a `manifest.sexp` and the `needs.lisp` that builds an entry (Gendl's
+README there is the reference).  The agent loads that tool from the
+checkout under test and places the entries in `local-projects/` beside
+the members for the pass, leaving out the ones the manifest excepts for
+the agent's lisps and any that are members themselves.  The list is
+part of the member's commit, so the lib-world's name already says which
+list was used.  An entry that cannot be built skips that lib-world with
+a message, rather than testing a world other than the one named.
+
 A lisp the stock dist does not serve well yet can carry a polyfill: a
 manifest, `polyfills/<lisp>.sexp`, listing the projects that need a
 patched source on that lisp for now, each as a git URL and a pinned

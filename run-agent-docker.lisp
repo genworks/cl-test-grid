@@ -409,6 +409,40 @@ feature in particular."
          :test #'string=)
         #'string<))
 
+(defun agent-lisp-names (agent)
+  (getf (find agent *agents* :key (lambda (entry) (getf entry :agent))) :names))
+
+(defun place-needs (agent overlay)
+  "Places in local-projects/ what the overlay's members say they need:
+a member may carry docker/quicklisp-needs/, a manifest of the libraries
+it needs beyond the dist and the tool that builds them (Gendl does; its
+README is the reference).  The list comes from the checkout under test,
+so the commit in the lib-world's name identifies it too.  Entries a
+member excepts for this agent's lisps, and members themselves, stay
+out.  An entry that cannot be built is an error: the world would not be
+what its name says."
+  (let ((local-projects (local-projects-dir agent))
+        (lisps (agent-lisp-names agent))
+        (members (mapcar (lambda (member) (getf member :project)) (overlay-members overlay))))
+    (dolist (project members)
+      (let* ((needs (merge-pathnames (format nil "~A/docker/quicklisp-needs/" project) local-projects))
+             (file (merge-pathnames "manifest.sexp" needs)))
+        (when (probe-file file)
+          (load (merge-pathnames "needs.lisp" needs))
+          (let* ((manifest (uiop:symbol-call :quicklisp-needs :read-manifest file))
+                 (entries (reduce (lambda (kept lisp)
+                                    (intersection kept
+                                                  (uiop:symbol-call :quicklisp-needs :entries-for manifest lisp)))
+                                  lisps
+                                  :initial-value (uiop:symbol-call :quicklisp-needs :entries manifest))))
+            (format t "~&~A declares ~D libraries for ~{~A~^, ~}.~%" project (length entries) lisps)
+            (dolist (entry entries)
+              (unless (member (getf entry :project) members :test #'string-equal)
+                (uiop:symbol-call :quicklisp-needs :materialize entry
+                                  (merge-pathnames (format nil "~A/" (getf entry :project)) local-projects)
+                                  :cache (merge-pathnames "needs-cache/" (overlays-dir agent))
+                                  :patches (merge-pathnames "patches/" needs))))))))))
+
 (defun test-overlay (agent overlay &key (base (dist-lib-world agent)))
   "Tests OVERLAY's members from their branches, together, as a
 lib-world over BASE, the dist's lib-world or a polyfilled one."
@@ -431,23 +465,28 @@ lib-world over BASE, the dist's lib-world or a polyfilled one."
     (ensure-directories-exist local-projects)
     (dolist (move moves)
       (run "mv" (car move) (cdr move)))
-    ;; Quicklisp rebuilds local-projects/system-index.txt in whichever
-    ;; lisp next looks, through DIRECTORY-ENTRIES, which its client
-    ;; implements for a fixed list of lisps (not EGCL): so the preferred
-    ;; lisp rebuilds it now, while the directory is newer than the index.
-    (refresh-local-projects agent)
     (unwind-protect
-         (test-grid-agent:test-patched-quicklisp
-          agent (quicklisp-dir agent) lib-world
-          :project-names (mapcar (lambda (member) (getf member :project)) members)
-          ;; the branches' own systems, not the dist's list for a
-          ;; release (a system a branch retired would be answered by
-          ;; the dist's copy; a project the dist lacks has no list)
-          :project-systems (loop for member in members for move in moves
-                               collect (cons (getf member :project) (branch-systems (cdr move)))))
+         (when (handler-case (progn (place-needs agent overlay) t)
+                 (error (e)
+                   (format t "~&Not testing ~S: what it needs could not be built: ~A~%" lib-world e)
+                   nil))
+           ;; Quicklisp rebuilds local-projects/system-index.txt in whichever
+           ;; lisp next looks, through DIRECTORY-ENTRIES, which its client
+           ;; implements for a fixed list of lisps (not EGCL): so the preferred
+           ;; lisp rebuilds it now, while the directory is newer than the index.
+           (refresh-local-projects agent)
+           (test-grid-agent:test-patched-quicklisp
+            agent (quicklisp-dir agent) lib-world
+            :project-names (mapcar (lambda (member) (getf member :project)) members)
+            ;; the branches' own systems, not the dist's list for a
+            ;; release (a system a branch retired would be answered by
+            ;; the dist's copy; a project the dist lacks has no list)
+            :project-systems (loop for member in members for move in moves
+                                collect (cons (getf member :project) (branch-systems (cdr move))))))
       (dolist (move moves)
         (run "mv" (cdr move) (car move)))
-      (uiop:delete-file-if-exists (merge-pathnames "system-index.txt" local-projects)))))
+      ;; what PLACE-NEEDS put there, and the index
+      (clear-local-projects agent))))
 
 ;;; Polyfills: the dist built from the lisp's manifest, installed over
 ;;; the stock one in the agent's private Quicklisp by a child of the
