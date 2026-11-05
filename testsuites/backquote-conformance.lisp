@@ -14,9 +14,10 @@
 ;;;; child process, with no dependencies.  A case is one of:
 ;;;;
 ;;;;   :clhs       the value follows from CLHS 2.4.6; a failure is a failure
-;;;;   :contested  nested splicing of several forms, where the result
-;;;;               turns on how the inner backquote expands; reported as
-;;;;               a known failure (K in the reports) until someone rules
+;;;;   :contested  several forms spliced under an inner backquote, where
+;;;;               the result turns on how that backquote expands, and
+;;;;               2.4.6 allows LIST* and CONS expansions that differ;
+;;;;               reported as a known failure (K in the reports)
 ;;;;   :open       CLHS leaves it open; written to the log, not reported
 
 (defpackage #:backquote-conformance
@@ -67,8 +68,6 @@
     (:clhs 1 "`#()" #())
     (:clhs 1 "`(foobar a b ,c ,'(e f g) d ,@'(e f g) (h i j) ,@c)"
      (foobar a b (22 33) (e f g) d e f g (h i j) 22 33))
-    (:clhs 2 "``(, @c)" (7))
-    (:clhs 2 "``(, .c)" (8))
     (:clhs 1 "`(1 ,b)" (1 11))
     (:clhs 1 "`(,'foo ,b)" (foo 11))
     (:clhs 1 "(let ((c (list 2 3)) (d (list 44 55))) `(x ,b ,@a ,.c ,.d))"
@@ -89,6 +88,10 @@
     (:contested 2 "``(foo ,@,@*q*)" (foo a b c sqrt 9))
     (:contested 2 "``(,@,@*qq*)" (3 5 4 6))
     (:contested 2 "``(,,@(list 1 2 3) 10)" (1 2 3 10))
+    ;; a form after a comma that begins with at-sign or dot, which CLHS
+    ;; 2.4.6 excepts, with a space to keep them apart
+    (:open 2 "``(, @c)" (7))
+    (:open 2 "``(, .c)" (8))
     ;; #n( under backquote, and cases Fare's file comments out
     (:open 1 "`#3(a ,b)" #(a 11 11))
     (:open 1 "`#5(a ,@c)" #(a 22 33 33 33))
