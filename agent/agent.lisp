@@ -99,7 +99,9 @@
 
 (defun projects-to-test (agent)
   (or (custom-project-names agent)
-      (project-names (project-lister agent))))
+      ;; a full pass also checks the implementation itself
+      (append (project-names (project-lister agent))
+              test-grid-testsuites:*implementation-checks*)))
 
 (defun update-testing-quicklisp (agent dist-specifier)
   "Ensures the private quicklisp of the agent

@@ -7,6 +7,8 @@
   (:use :cl)
   (:export  ;; list of the libraries added to test-grid
             #:*all-libs*
+            ;; those of them that check the implementation, not a library
+            #:*implementation-checks*
             ;; the generic function to be implemented for evey library
             #:libtest))
 
@@ -95,8 +97,13 @@ just passed to the QUICKLISP:QUICKLOAD."
  #| :cleric |#          #| :cl-erlang-term |#    :stmx                :cl-epmd
     :bencode               :jsown                :nibbles             :cl-custom-hash-table
     :hyperluminal-mem      :cl-python            :cl-slug             :cl+ssl
-    :gendl)
+    :gendl                 :backquote-conformance)
   "All the libraries, testsuites of which we know how to run.")
+
+(defparameter *implementation-checks* '("backquote-conformance")
+  "Entries of *ALL-LIBS* that are no project of a dist: they check the
+implementation itself.  A full pass over a dist runs them after its
+projects; they have no systems, so no load results.")
 
 (defun try-quickload (system-name)
   "(ql:quickload system-name), but suppress
@@ -1366,4 +1373,10 @@ https://github.com/flambard/cl-erlang-term/issues/6
   (ql:quickload :regression)
   (fncall "gdl-lift-utils:define-regression-tests")
   (run-lift-test-suite (read-from-string "gdl-lift-utils::gdl-regression-tests")))
+
+(defmethod libtest ((library-name (eql :backquote-conformance)))
+  ;; No test framework and no library: the implementation's own backquote.
+  (load (asdf:system-relative-pathname :test-grid-testsuites
+                                       "testsuites/backquote-conformance.lisp"))
+  (funcall (read-from-string "backquote-conformance:run-checks")))
 

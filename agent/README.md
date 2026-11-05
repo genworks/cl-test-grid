@@ -202,6 +202,20 @@ that depend on it, direct and transitive, from the dist's own index.
 A library with no test suite is still exercised that way, thousands of
 times over a dist.
 
+Some checks test the implementation rather than a library:
+`test-grid-testsuites:*implementation-checks*`, so far
+`backquote-conformance`, the evaluated results of the implementation's
+own backquote, filtered from fare-quasiquote's tests
+(`testsuites/backquote-conformance.lisp`).  A full pass over a dist
+runs them after its projects, and they appear in the reports like a
+library with no systems to load.  Overlay worlds and a list of chosen
+projects leave them out.  To add the check to a lisp already tested on
+a dist, name it: `TEST_GRID_LISPS=sbcl
+TEST_GRID_PROJECTS=backquote-conformance ./run-agent-docker.sh` uploads
+a partial run of just that.  A failure of a case the standard defines
+reports as a failure; a case that depends on how the inner backquote
+expands reports as a known failure.
+
 `:docker-lisp` is the lisp-exe of the implementation inside the image.
 `:volumes` must list the cl-test-grid source directory and the agent's
 work directory (if it is not under the source directory): they are
