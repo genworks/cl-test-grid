@@ -171,9 +171,17 @@
     ;; on 2026-11-03 was not this image but Quicklisp's client
     ;; rebuilding the local-projects index on a lisp it has no
     ;; DIRECTORY-ENTRIES for; the preferred lisp rebuilds it now, see
-    ;; TEST-OVERLAY.)
+    ;; TEST-OVERLAY.)  :prebuild: cl-unicode's tables (lists.lisp,
+    ;; hash-tables.lisp, methods.lisp, generated into its source
+    ;; directory by cl-unicode/build when missing) take EGCL longer
+    ;; than a load test's 15 minutes from cold (Green's bliss-ks0tt),
+    ;; and a killed build leaves nothing for the next load: so the
+    ;; preferred lisp generates them first, as Green's --prepare-unicode
+    ;; does, and EGCL compiles the generated files.  Kept here and not
+    ;; in the manifest, whose hash names the polyfilled world: the
+    ;; libraries tested are the same either way.
     ("egcl"    :image "egcl:0.0.11-trixie-gnu" :arches ("amd64" "arm64")
-               :polyfill "polyfills/egcl.sexp"
+               :polyfill "polyfills/egcl.sexp" :prebuild ("cl-unicode")
                :lisp ,(make-instance 'lisp-exe:egcl :exe-path "egcl"))
     ("allegro" :image "allegro:11.0express-trixie" :arches ("amd64" "arm64")
                :lisp ,(make-instance 'lisp-exe:acl :exe-path "alisp")
@@ -603,7 +611,26 @@ are among what is fetched."
               (run-in-preferred-lisp agent 7200
                                      ;; and a fresh local-projects index (see TEST-OVERLAY)
                                      '(ql:register-local-projects)
-                                     `(cl-user::prefetch-releases ',names))))))
+                                     `(cl-user::prefetch-releases ',names)))
+      (prebuild agent))))
+
+(defun prebuild (agent)
+  "Loads, in the preferred lisp, the systems the catalog lists under
+:PREBUILD for this agent's lisps: those whose first load generates
+files the lisp under test is too slow to generate within a load test's
+timeout.  A failure is reported, not fatal: the lisp under test then
+generates them itself, as it would have."
+  (dolist (system (remove-duplicates
+                   (loop for name in (agent-lisp-names agent)
+                         append (getf (rest (assoc name *catalog* :test #'string=)) :prebuild))
+                   :test #'string=))
+    (format t "~&Prebuilding ~A in the preferred lisp ...~%" system)
+    (finish-output)
+    (format t "~&Prebuilt ~A: ~:[failed, the lisp under test will build it~;done~].~%"
+            system
+            (run-in-preferred-lisp agent 1800
+                                   `(handler-case (progn (ql:quickload ,system :silent t) t)
+                                      (error () nil))))))
 
 (defun test-polyfilled (agent lib-world)
   "The whole dist on the polyfilled Quicklisp, or TEST_GRID_PROJECTS
