@@ -283,10 +283,17 @@ command, the rest strings are the command arguments."))
                    :native-process (start (first command-line)
                                           (rest command-line)))))
 
+(defvar *container-name-random-state* (make-random-state t)
+  "Seeded at load: a fresh CCL starts every process from the same
+*RANDOM-STATE*, so agents started together drew the same container
+names in the same order, and the second docker run of a name failed at
+once with no response file (the NO-RESPONSE at an agent's start-up
+check, which cost a whole pass).")
+
 (defmethod start-lisp-process ((lisp-exe docker) &rest forms)
   (let* ((container-name (format nil "test-grid-~D-~36R"
                                  (get-universal-time)
-                                 (random #.(expt 36 6))))
+                                 (random #.(expt 36 6) *container-name-random-state*)))
          (volume-args (mapcan (lambda (dir)
                                 (let ((path (string-right-trim "/" (namestring (truename dir)))))
                                   (list "--volume" (format nil "~A:~A" path path))))
